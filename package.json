@@ -1,0 +1,18 @@
+{
+  "name": "nebula-enterprise",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terminal session manager on top of the OpenCode V2 background service. Zero npm packages.",
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "bin": {
+    "nebula-enterprise": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "doctor": "node src/main.ts doctor"
+  }
+}
