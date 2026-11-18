@@ -1,0 +1,39 @@
+[
+  {
+    "createdBy": { "displayName": "Kim Fictional", "uniqueName": "kim@fabrikam-sample.example" },
+    "isDraft": false,
+    "pullRequestId": 77,
+    "repository": {
+      "id": "9e9e9e9e-4444-4f4f-8a8a-999999999999",
+      "name": "Legacy Repo",
+      "project": { "id": "8d8d8d8d-5555-4e4e-9f9f-888888888888", "name": "Old Project" },
+      "url": "https://fabrikam-sample.visualstudio.com/8d8d8d8d-5555-4e4e-9f9f-888888888888/_apis/git/repositories/9e9e9e9e-4444-4f4f-8a8a-999999999999"
+    },
+    "sourceRefName": "refs/heads/bugfix/null-check",
+    "status": "completed",
+    "targetRefName": "refs/heads/master",
+    "title": "Null check in parser",
+    "url": "https://fabrikam-sample.visualstudio.com/8d8d8d8d-5555-4e4e-9f9f-888888888888/_apis/git/repositories/9e9e9e9e-4444-4f4f-8a8a-999999999999/pullRequests/77"
+  },
+  {
+    "createdBy": { "displayName": "Lee Sample" },
+    "isDraft": false,
+    "pullRequestId": 78,
+    "repository": {
+      "name": "Legacy Repo",
+      "project": { "name": "Old Project" },
+      "webUrl": "https://fabrikam-sample.visualstudio.com/DefaultCollection/Old%20Project/_git/Legacy%20Repo"
+    },
+    "sourceRefName": "refs/heads/old/abandoned",
+    "status": "abandoned",
+    "targetRefName": "refs/heads/master",
+    "title": "Abandoned idea",
+    "url": "https://fabrikam-sample.visualstudio.com/DefaultCollection/_apis/git/repositories/x/pullRequests/78"
+  },
+  {
+    "pullRequestId": 79,
+    "title": "Insecure link",
+    "status": "notSet",
+    "repository": { "name": "r", "webUrl": "http://fabrikam-sample.visualstudio.com/p/_git/r" }
+  }
+]

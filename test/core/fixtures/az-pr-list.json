@@ -1,0 +1,95 @@
+[
+  {
+    "artifactId": "vstfs:///Git/PullRequestId/0b1c2d3e-1111-4a4a-9b9b-123456789abc%2f5f6e7d8c-2222-4b4b-8c8c-abcdef012345%2f4211",
+    "autoCompleteSetBy": null,
+    "closedBy": null,
+    "closedDate": null,
+    "codeReviewId": 4211,
+    "commits": null,
+    "completionOptions": null,
+    "completionQueueTime": null,
+    "createdBy": {
+      "descriptor": "aad.ZmFrZS1kZXNjcmlwdG9yLTE",
+      "directoryAlias": null,
+      "displayName": "Robin Example",
+      "id": "aaaaaaaa-0000-4000-8000-000000000001",
+      "imageUrl": "https://dev.azure.com/contoso-sample/_api/_common/identityImage?id=aaaaaaaa-0000-4000-8000-000000000001",
+      "uniqueName": "robin@contoso-sample.example",
+      "url": "https://spsprodweu5.vssps.visualstudio.com/A00000000-0000-0000-0000-000000000000/_apis/Identities/aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "creationDate": "2026-11-12T09:41:07.123456+00:00",
+    "description": "Adds retry with backoff to the export job.",
+    "forkSource": null,
+    "hasMultipleMergeBases": false,
+    "isDraft": false,
+    "labels": [],
+    "lastMergeCommit": { "commitId": "1111111111111111111111111111111111111111", "url": "https://dev.azure.com/contoso-sample/0b1c2d3e-1111-4a4a-9b9b-123456789abc/_apis/git/repositories/5f6e7d8c-2222-4b4b-8c8c-abcdef012345/commits/1111111111111111111111111111111111111111" },
+    "lastMergeSourceCommit": { "commitId": "2222222222222222222222222222222222222222" },
+    "lastMergeTargetCommit": { "commitId": "3333333333333333333333333333333333333333" },
+    "mergeId": "4c4c4c4c-3333-4d4d-8e8e-000000000003",
+    "mergeStatus": "succeeded",
+    "pullRequestId": 4211,
+    "remoteUrl": null,
+    "repository": {
+      "defaultBranch": null,
+      "id": "5f6e7d8c-2222-4b4b-8c8c-abcdef012345",
+      "isDisabled": false,
+      "isFork": null,
+      "name": "billing-service",
+      "parentRepository": null,
+      "project": {
+        "abbreviation": null,
+        "defaultTeamImageUrl": null,
+        "description": null,
+        "id": "0b1c2d3e-1111-4a4a-9b9b-123456789abc",
+        "lastUpdateTime": "0001-01-01T00:00:00",
+        "name": "Platform Team",
+        "revision": null,
+        "state": "unchanged",
+        "url": null,
+        "visibility": "unchanged"
+      },
+      "remoteUrl": null,
+      "size": null,
+      "sshUrl": null,
+      "url": "https://dev.azure.com/contoso-sample/0b1c2d3e-1111-4a4a-9b9b-123456789abc/_apis/git/repositories/5f6e7d8c-2222-4b4b-8c8c-abcdef012345",
+      "validRemoteUrls": null,
+      "webUrl": "https://dev.azure.com/contoso-sample/Platform%20Team/_git/billing-service"
+    },
+    "reviewers": [
+      { "displayName": "Sam Sample", "id": "aaaaaaaa-0000-4000-8000-000000000002", "isRequired": true, "uniqueName": "sam@contoso-sample.example", "vote": 10 }
+    ],
+    "sourceRefName": "refs/heads/feature/export-retry",
+    "status": "active",
+    "supportsIterations": true,
+    "targetRefName": "refs/heads/main",
+    "title": "Export: retry with backoff",
+    "url": "https://dev.azure.com/contoso-sample/0b1c2d3e-1111-4a4a-9b9b-123456789abc/_apis/git/repositories/5f6e7d8c-2222-4b4b-8c8c-abcdef012345/pullRequests/4211",
+    "workItemRefs": null
+  },
+  {
+    "codeReviewId": 4219,
+    "createdBy": {
+      "displayName": "Alex Placeholder",
+      "id": "aaaaaaaa-0000-4000-8000-000000000003",
+      "uniqueName": "alex@contoso-sample.example"
+    },
+    "creationDate": "2026-11-15T16:02:44.5+00:00",
+    "description": null,
+    "isDraft": true,
+    "mergeStatus": "queued",
+    "pullRequestId": 4219,
+    "repository": {
+      "id": "5f6e7d8c-2222-4b4b-8c8c-abcdef012345",
+      "name": "billing-service",
+      "project": { "id": "0b1c2d3e-1111-4a4a-9b9b-123456789abc", "name": "Platform Team", "state": "unchanged" },
+      "url": "https://dev.azure.com/contoso-sample/0b1c2d3e-1111-4a4a-9b9b-123456789abc/_apis/git/repositories/5f6e7d8c-2222-4b4b-8c8c-abcdef012345"
+    },
+    "reviewers": [],
+    "sourceRefName": "refs/heads/users/alex/WIP & \"quotes\" test",
+    "status": "active",
+    "targetRefName": "refs/heads/release/2026.11",
+    "title": "WIP: invoice PDF layout",
+    "url": "https://dev.azure.com/contoso-sample/0b1c2d3e-1111-4a4a-9b9b-123456789abc/_apis/git/repositories/5f6e7d8c-2222-4b4b-8c8c-abcdef012345/pullRequests/4219"
+  }
+]

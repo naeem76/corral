@@ -18,3 +18,4 @@ export { SessionTracker, TRACKED_EVENTS } from './sessions.ts';
 export type { EventHandlers, EventSubscriber, SessionInfo, SessionMetaStore, TrackerOptions } from './sessions.ts';
 export { nullPrProvider } from './pr.ts';
 export type { PrProvider } from './pr.ts';
+export { createAzurePrProvider, mapPullRequest, parsePrList, pullRequestWebUrl, resolveAzLaunch, AZ_PR_LIST_ARGS } from './pr-azure.ts';
