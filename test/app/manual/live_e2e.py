@@ -153,7 +153,14 @@ def main():
     if os.environ.get("NEBULA_LIVE") != "1":
         print("skipped: set NEBULA_LIVE=1 to run the live end-to-end check")
         return 0
-    scratch = os.path.realpath(tempfile.mkdtemp(prefix="nebula-live-e2e-"))
+    # A fixed name: OpenCode keeps a project record per directory and cannot delete one.
+    scratch = os.path.join(tempfile.gettempdir(), "nebula-live-e2e")
+    shutil.rmtree(scratch, ignore_errors=True)
+    try:
+        os.mkdir(scratch, 0o700)
+    except OSError:
+        scratch = tempfile.mkdtemp(prefix="nebula-live-e2e-")
+    scratch = os.path.realpath(scratch)
     project = os.path.join(scratch, "live-project")
     state_dir = os.path.join(scratch, "state")
     os.makedirs(project)

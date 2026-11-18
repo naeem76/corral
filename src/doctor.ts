@@ -325,9 +325,23 @@ function getServiceVersion(ctx: Ctx) {
   return ctx.serviceVersion;
 }
 
+// OpenCode keeps a project record for every directory that gets a session or a PTY, and its
+// API cannot delete one. A fixed name keeps repeated runs at one record. The plain `mkdir`
+// fails when another user planted something at that name; then a random name is used.
+async function fixedScratch(base: string, name: string): Promise<string> {
+  const dir = path.join(base, name);
+  try {
+    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.mkdir(dir, { mode: 0o700 });
+    return dir;
+  } catch {
+    return fsp.mkdtemp(path.join(base, name + '-'));
+  }
+}
+
 function getScratch(ctx: Ctx) {
   ctx.scratch ??= (async () => {
-    const dir = await fsp.mkdtemp(path.join(ctx.d.tmpdir, 'nebula-doctor-'));
+    const dir = await fixedScratch(ctx.d.tmpdir, 'nebula-doctor-scratch');
     ctx.scratchDirs.push(dir);
     // OpenCode keys sessions by the directory string; use the canonical form.
     return fsp.realpath(dir).catch(() => dir);

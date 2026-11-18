@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { OpenCodeClient, OpenCodeError } from '../../src/core/opencode.ts';
@@ -23,8 +23,16 @@ async function caught(p: Promise<unknown>): Promise<OpenCodeError> {
 
 const skip = process.env.NEBULA_LIVE === '1' ? false : 'set NEBULA_LIVE=1 to run live tests';
 
+// A fixed name: OpenCode keeps a project record per directory and cannot delete one.
 async function scratch(): Promise<string> {
-  return realpath(await mkdtemp(path.join(os.tmpdir(), 'nebula-live-')));
+  const dir = path.join(os.tmpdir(), 'nebula-live-scratch');
+  try {
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(dir, { mode: 0o700 });
+    return await realpath(dir);
+  } catch {
+    return realpath(await mkdtemp(path.join(os.tmpdir(), 'nebula-live-')));
+  }
 }
 
 test('live: PTY round trip with a Node one-liner', { skip, timeout: 30_000 }, async () => {
