@@ -10,8 +10,8 @@ It replaces Nebula (a Rust TUI) and T3 Code for a workplace where neither is per
 
 - **Target: Windows 11, Windows Terminal, PowerShell. `cmd.exe` is disabled.**
   Development and tests run on Linux. All code must work on both.
-- **Runtime: Node.js 26. Zero npm packages**, at run time and at development time.
-  No `dependencies`, no `devDependencies`, no vendored third-party code.
+- **Runtime: Node.js 26. Zero npm packages.** No `dependencies`, no `devDependencies`, no
+  vendored third-party code. The program and its tests must run with no `node_modules`.
 - **TypeScript without a build step.** Node 26 removes the types itself. Use only erasable
   syntax: no `enum`, no `namespace`, no constructor parameter properties, no decorators.
   Import with the full file name: `import { x } from './store.ts'`. Use `import type` for types.
@@ -30,8 +30,13 @@ On the development machine the default Node is 24, so select 26:
 fnm exec --using=26 node --test "test/**/*.test.ts"     # all tests
 fnm exec --using=26 node src/main.ts                    # run the TUI
 fnm exec --using=26 node src/main.ts doctor             # check the machine
-npx -y -p typescript tsc --noEmit -p .                  # optional type check, dev machine only
+npx tsc --noEmit -p .                                   # type check, dev machine only (see below)
 ```
+
+The type check uses `typescript` and `@types/node` from a local `node_modules` that is not
+recorded anywhere: `npm i --no-save typescript @types/node`. It is already installed on the
+development machine. `package.json` must stay without dependencies. Other workers can be in the
+middle of a change, so judge only the errors in your own files.
 
 Tests use `node:test` and `node:assert/strict`. Unit tests must not need a running OpenCode
 service: use a fake HTTP/WebSocket server from `node:http`, or inject a transport.
@@ -40,6 +45,7 @@ service: use a fake HTTP/WebSocket server from `node:http`, or inject a transpor
 
 ```
 src/types.ts        shared contracts (owner: planner; do not edit in a worker task)
+src/width.ts        display width of text (owner: planner; do not edit in a worker task)
 src/main.ts         entry: TUI by default, `doctor` subcommand
 src/core/           OpenCode client, events, PTY, state store, Git, session status
 src/term/           terminal emulator (VT parser + screen grid)
