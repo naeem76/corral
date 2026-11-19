@@ -213,14 +213,14 @@ test('log: lines are redacted and written asynchronously', async () => {
 });
 
 test('stale: titles and owners', () => {
-  assert.equal(ptyTitle(12, 'ses_x'), 'nebula-enterprise:12:ses_x');
-  assert.equal(ptyOwner('nebula-enterprise:12:ses_x'), 12);
-  assert.equal(ptyOwner('nebula-enterprise:abc:ses_x'), null);
+  assert.equal(ptyTitle(12, 'ses_x'), 'corral:12:ses_x');
+  assert.equal(ptyOwner('corral:12:ses_x'), 12);
+  assert.equal(ptyOwner('corral:abc:ses_x'), null);
   assert.equal(ptyOwner('other'), null);
   assert.equal(ptyOwner(undefined), null);
   // Copilot session ids are UUIDs: no colon, so the owner is found the same way.
   const uuid = '3594e778-86c4-4da7-b393-1259e8bc1057';
-  assert.equal(ptyTitle(12, uuid), `nebula-enterprise:12:${uuid}`);
+  assert.equal(ptyTitle(12, uuid), `corral:12:${uuid}`);
   assert.equal(ptyOwner(ptyTitle(4242, uuid)), 4242);
 });
 

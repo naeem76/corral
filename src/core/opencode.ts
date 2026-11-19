@@ -28,9 +28,9 @@ export interface DiscoverDeps {
 export async function discoverService(deps: DiscoverDeps = {}): Promise<ServiceInfo | null> {
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
-  const url = envGet(env, 'NEBULA_OPENCODE_URL', platform);
+  const url = envGet(env, 'CORRAL_OPENCODE_URL', platform);
   if (url) {
-    return { url: url.replace(/\/+$/, ''), password: envGet(env, 'NEBULA_OPENCODE_PASSWORD', platform) ?? '', source: 'env' };
+    return { url: url.replace(/\/+$/, ''), password: envGet(env, 'CORRAL_OPENCODE_PASSWORD', platform) ?? '', source: 'env' };
   }
   const read = deps.readFile ?? ((p: string) => readFile(p, 'utf8'));
   for (const file of serviceFileCandidates(env, platform, deps.homedir ?? os.homedir())) {

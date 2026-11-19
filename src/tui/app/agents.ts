@@ -185,8 +185,8 @@ export function agentHelpLines(app: App): Array<{ heading?: string; key?: string
 export function quitText(app: App): string {
   const copilot = app.panes.list().filter((p) => p.agent === 'copilot');
   const base = app.deps.hub.source('opencode') && app.service !== 'absent'
-    ? 'Leave nebula-enterprise? OpenCode sessions keep running in the OpenCode service.'
-    : 'Leave nebula-enterprise?';
+    ? 'Leave corral? OpenCode sessions keep running in the OpenCode service.'
+    : 'Leave corral?';
   if (copilot.length === 0) return base.replace('OpenCode sessions keep', 'Sessions keep');
   const busy = copilot.filter((p) => {
     const st = app.deps.hub.status(p.sessionId);

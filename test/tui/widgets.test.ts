@@ -342,10 +342,10 @@ test('fuzzy: subsequence, positions and smart case', () => {
   assert.equal(fuzzyMatch('xyz', 'abc'), null);
   assert.deepEqual(fuzzyMatch('', 'abc'), { score: 0, positions: [] });
   assert.deepEqual(fuzzyMatch('abc', 'a-b-c')?.positions, [0, 2, 4]);
-  assert.deepEqual(fuzzyMatch('NE', 'nebula-enterprise'), null);
+  assert.deepEqual(fuzzyMatch('NE', 'tabula-enterprise'), null);
   assert.deepEqual(fuzzyMatch('ne', 'Nebula-Enterprise')?.positions, [0, 1]);
   // Prefers the word start over an earlier scattered match.
-  assert.deepEqual(fuzzyMatch('ent', 'nebula-enterprise')?.positions, [7, 8, 9]);
+  assert.deepEqual(fuzzyMatch('ent', 'tabula-enterprise')?.positions, [7, 8, 9]);
   assert.deepEqual(fuzzyMatch('宽', 'a宽b')?.positions, [1]);
 });
 

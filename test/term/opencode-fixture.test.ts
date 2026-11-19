@@ -37,7 +37,7 @@ function checkHomeScreen(em: Emulator): void {
   // No escape-sequence garbage in the grid.
   assert.doesNotMatch(screen, /\x1b/);
   assert.doesNotMatch(screen, /[\x00-\x08\x0b-\x1f\x7f]/);
-  for (const bad of ['[?', '$y', 'rgb:', '$p', ';1R', '62;22', 'nebula-enterprise', '\\', 'opentui', 'i=31337', 'w=1;']) {
+  for (const bad of ['[?', '$y', 'rgb:', '$p', ';1R', '62;22', 'corral', '\\', 'opentui', 'i=31337', 'w=1;']) {
     assert.ok(!screen.includes(bad), `grid contains ${JSON.stringify(bad)}`);
   }
 
@@ -138,7 +138,7 @@ test('OpenCode replay sends the expected replies', () => {
   for (const r of [
     '\x1b]10;rgb:d0d0/d0d0/d0d0\x1b\\',
     '\x1b]11;rgb:1010/1010/1010\x1b\\',
-    '\x1bP>|nebula-enterprise\x1b\\',
+    '\x1bP>|corral\x1b\\',
     '\x1b[1;1R',
     '\x1bP0+r\x1b\\',
     '\x1b[?2026;2$y',

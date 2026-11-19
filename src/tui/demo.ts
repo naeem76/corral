@@ -58,13 +58,13 @@ function items(rows: Row[], prefix: string): ListItem<Row>[] {
 export function createDemoState(): DemoState {
   const projects: ListItem<Row>[] = [
     { key: 'h-work', data: { label: 'Work' }, header: true },
-    ...items([{ label: 'nebula-enterprise' }, { label: 'billing-service' }, { label: 'docs-site' }], 'p'),
+    ...items([{ label: 'corral' }, { label: 'billing-service' }, { label: 'docs-site' }], 'p'),
     { key: 'h-oss', data: { label: 'Open source' }, header: true },
     ...items(Array.from({ length: 20 }, (_, i) => ({ label: `oss-project-${i + 1}` })), 'q'),
   ];
   const git = items(
     [
-      { label: 'main', detail: '~/dev/nebula-enterprise' },
+      { label: 'main', detail: '~/dev/corral' },
       { label: 'feature/tui-toolkit', detail: '~/dev/wt/tui-toolkit' },
       { label: 'fix/windows-paths', detail: '~/dev/wt/windows-paths' },
       { label: 'PR 412 宽字符 support ✨', detail: 'active · Naeem → main' },

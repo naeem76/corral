@@ -2,7 +2,7 @@
 //   node live_api.ts sessions <dir>          ids of the sessions in <dir>
 //   node live_api.ts ptys <dir>              [{ id, title }] of the PTYs of location <dir>
 //   node live_api.ts delete-session <id>     delete one session (only ids the test created)
-//   node live_api.ts delete-pty <dir> <id>   delete one PTY (only nebula-enterprise: titles)
+//   node live_api.ts delete-pty <dir> <id>   delete one PTY (only corral: titles)
 //   node live_api.ts version                 service version
 
 import { discoverService, OpenCodeClient } from '../../../src/core/opencode.ts';
@@ -27,7 +27,7 @@ async function main(): Promise<unknown> {
     case 'delete-pty': {
       const r = await client.request<{ data: Array<{ id: string; title: string }> }>('GET', '/api/pty', { query: loc(a as string) });
       const p = r.data.find((x) => x.id === b);
-      if (!p || !p.title.startsWith('nebula-enterprise:')) return 'refused';
+      if (!p || !p.title.startsWith('corral:')) return 'refused';
       await client.request('DELETE', `/api/pty/${encodeURIComponent(b as string)}`, { query: loc(a as string) });
       return 'deleted';
     }

@@ -1007,7 +1007,7 @@ export class Terminal implements Emulator, ParserHandler {
       if (inter === 0 && final === 0x63) {
         if (p0 <= 0) this.reply(`${CSI}>0;0;0c`);
       } else if (inter === 0 && final === 0x71) {
-        if (p0 <= 0) this.reply(`${ESC}P>|nebula-enterprise${ST}`);
+        if (p0 <= 0) this.reply(`${ESC}P>|corral${ST}`);
       }
       // CSI > Ps u (kitty push) and CSI > 4 ; Ps m (modifyOtherKeys): ignored.
       return;

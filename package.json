@@ -1,14 +1,15 @@
 {
-  "name": "nebula-enterprise",
+  "name": "corral",
   "version": "0.1.0",
   "private": true,
-  "description": "Terminal session manager on top of the OpenCode V2 background service. Zero npm packages.",
+  "description": "Terminal session manager for OpenCode and GitHub Copilot CLI sessions. Zero npm packages.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=26"
   },
   "bin": {
-    "nebula-enterprise": "./src/main.ts"
+    "corral": "./src/main.ts"
   },
   "scripts": {
     "start": "node src/main.ts",

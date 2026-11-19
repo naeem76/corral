@@ -1,6 +1,6 @@
-# nebula-enterprise
+# corral
 
-nebula-enterprise is a terminal program that manages OpenCode and GitHub Copilot CLI sessions.
+corral is a terminal program that manages OpenCode and GitHub Copilot CLI sessions.
 It shows a Projects column, a Git column (the main checkout, worktrees, pull requests, and
 folders without Git), a Sessions column, and a pane that runs the OpenCode TUI or Copilot.
 
@@ -37,8 +37,8 @@ For the first run on Windows, read [docs/windows.md](docs/windows.md).
 
 The program keeps one file, `state.json`, in:
 
-- Windows: `%LOCALAPPDATA%\nebula-enterprise`
-- Other systems: `$XDG_STATE_HOME/nebula-enterprise`, else `~/.local/state/nebula-enterprise`
+- Windows: `%LOCALAPPDATA%\corral`
+- Other systems: `$XDG_STATE_HOME/corral`, else `~/.local/state/corral`
 
 It writes the file atomically (a temporary file, then a rename).
 
@@ -46,15 +46,15 @@ It writes the file atomically (a temporary file, then a rename).
 
 | Name | Use |
 | --- | --- |
-| `NEBULA_OPENCODE_URL` | URL of the OpenCode service. Skips the `service.json` lookup. |
-| `NEBULA_OPENCODE_PASSWORD` | Password for `NEBULA_OPENCODE_URL`. |
-| `NEBULA_OPENCODE_SERVICE_FILE` | Path of the OpenCode `service.json` file. |
-| `NEBULA_STATE_DIR` | Folder for `state.json`. |
-| `NEBULA_LOG` | Path of a debug log file. Secrets are removed from each line. |
-| `NEBULA_COPILOT_HOME` | Copilot home folder for this program (holds `session-state`). Default: `COPILOT_HOME`, else `~/.copilot`. |
-| `NEBULA_COPILOT_BIN` | Path of the Copilot program (on Windows a `.exe`). Default: found on PATH. |
-| `COPILOT_HOME` | Copilot's own home folder variable; read when `NEBULA_COPILOT_HOME` is not set. |
-| `NEBULA_LIVE` | Set to `1` to run the live tests against the real OpenCode service. |
+| `CORRAL_OPENCODE_URL` | URL of the OpenCode service. Skips the `service.json` lookup. |
+| `CORRAL_OPENCODE_PASSWORD` | Password for `CORRAL_OPENCODE_URL`. |
+| `CORRAL_OPENCODE_SERVICE_FILE` | Path of the OpenCode `service.json` file. |
+| `CORRAL_STATE_DIR` | Folder for `state.json`. |
+| `CORRAL_LOG` | Path of a debug log file. Secrets are removed from each line. |
+| `CORRAL_COPILOT_HOME` | Copilot home folder for this program (holds `session-state`). Default: `COPILOT_HOME`, else `~/.copilot`. |
+| `CORRAL_COPILOT_BIN` | Path of the Copilot program (on Windows a `.exe`). Default: found on PATH. |
+| `COPILOT_HOME` | Copilot's own home folder variable; read when `CORRAL_COPILOT_HOME` is not set. |
+| `CORRAL_LIVE` | Set to `1` to run the live tests against the real OpenCode service. |
 
 ## Keys
 
@@ -177,7 +177,7 @@ The width of the inbox list is `ui.inboxWidth` in `state.json` (default 56, mini
 node --test "test/**/*.test.ts"
 ```
 
-The default run needs no OpenCode service and no Copilot. Live tests run only with `NEBULA_LIVE=1`. They work
+The default run needs no OpenCode service and no Copilot. Live tests run only with `CORRAL_LIVE=1`. They work
 in new scratch folders and delete what they create. Scripts under `test/manual/` and
 `test/tui/manual/` drive the program in a pseudo-terminal; they are not part of the default run.
 `test/copilot/manual/check.ts` runs the real Copilot CLI offline against a fake local model
@@ -199,5 +199,14 @@ src/term/        terminal emulator for the pane (VT parser and screen grid)
 src/tui/         input decoder, renderer, widgets, the application
 test/            tests; the folders follow src/
 docs/            OpenCode API document, Windows notes
-bin/ne.ps1       optional PowerShell launcher
+bin/corral.ps1   optional PowerShell launcher
 ```
+
+## Credits and licence
+
+The projects view follows the ideas and the keys of
+[Nebula](https://github.com/AgentSystemLabs/nebula). The inbox view, with snooze and settle,
+follows the inbox of T3 Code. corral is a separate program: it shares no code with them and is
+not affiliated with them, with OpenCode or with GitHub.
+
+MIT. See [LICENSE](LICENSE).

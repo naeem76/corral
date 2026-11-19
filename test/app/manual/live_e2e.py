@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Live end-to-end check of the real program against the real OpenCode service.
 
-Opt-in: runs only with NEBULA_LIVE=1. Linux/macOS (uses the pty module for this driver only).
+Opt-in: runs only with CORRAL_LIVE=1. Linux/macOS (uses the pty module for this driver only).
 
 What it does, following the safety rules in AGENTS.md:
   1. Make a fresh scratch folder with an empty project folder and a state.json that lists it.
-  2. Start `node src/main.ts` in a pseudo-terminal with NEBULA_STATE_DIR pointing there.
+  2. Start `node src/main.ts` in a pseudo-terminal with CORRAL_STATE_DIR pointing there.
   3. Focus the Sessions column, press n (new session), wait for the OpenCode home screen in
      the pane. No prompt is sent to a model.
   4. Replay the captured output through src/term (replay.ts) and check that the three column
      titles and the OpenCode logo and prompt box are on screen together, in the right places.
   5. Leave the pane (Ctrl+Q), quit (q, Enter), check the terminal restore sequence.
-  6. Check through the API that no nebula-enterprise PTY is left; delete the session that the
+  6. Check through the API that no corral PTY is left; delete the session that the
      test created; remove the scratch folder. The service is never stopped or restarted.
 
-    NEBULA_LIVE=1 python3 test/app/manual/live_e2e.py
+    CORRAL_LIVE=1 python3 test/app/manual/live_e2e.py
 """
 
 import fcntl
@@ -72,11 +72,11 @@ def prompt_box(screen):
 
 
 def our_ptys(project):
-    return [p for p in api("ptys", project) if p["title"].startswith("nebula-enterprise:")]
+    return [p for p in api("ptys", project) if p["title"].startswith("corral:")]
 
 
 def pty_pid(p):
-    # Title: nebula-enterprise:<pid>:<sessionId>; the pid is the node process of the program.
+    # Title: corral:<pid>:<sessionId>; the pid is the node process of the program.
     return int(p["title"].split(":")[1])
 
 
@@ -150,16 +150,16 @@ class App:
 
 
 def main():
-    if os.environ.get("NEBULA_LIVE") != "1":
-        print("skipped: set NEBULA_LIVE=1 to run the live end-to-end check")
+    if os.environ.get("CORRAL_LIVE") != "1":
+        print("skipped: set CORRAL_LIVE=1 to run the live end-to-end check")
         return 0
     # A fixed name: OpenCode keeps a project record per directory and cannot delete one.
-    scratch = os.path.join(tempfile.gettempdir(), "nebula-live-e2e")
+    scratch = os.path.join(tempfile.gettempdir(), "corral-live-e2e")
     shutil.rmtree(scratch, ignore_errors=True)
     try:
         os.mkdir(scratch, 0o700)
     except OSError:
-        scratch = tempfile.mkdtemp(prefix="nebula-live-e2e-")
+        scratch = tempfile.mkdtemp(prefix="corral-live-e2e-")
     scratch = os.path.realpath(scratch)
     project = os.path.join(scratch, "live-project")
     state_dir = os.path.join(scratch, "state")
@@ -178,7 +178,7 @@ def main():
     check(len(before) == 0, "the scratch folder has no sessions before the test")
 
     env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor",
-               NEBULA_STATE_DIR=state_dir, NEBULA_LOG=os.path.join(scratch, "app.log"))
+               CORRAL_STATE_DIR=state_dir, CORRAL_LOG=os.path.join(scratch, "app.log"))
     app = App(env)
     screen = []
     created = set()
@@ -276,8 +276,8 @@ def main():
         app.kill()
         # Clean up everything this test created, and only that.
         try:
-            left = [p for p in api("ptys", project) if p["title"].startswith("nebula-enterprise:")]
-            check(len(left) == 0, f"no nebula-enterprise PTY left in the service ({left})")
+            left = [p for p in api("ptys", project) if p["title"].startswith("corral:")]
+            check(len(left) == 0, f"no corral PTY left in the service ({left})")
             for p in left:
                 api("delete-pty", project, p["id"])
         except Exception as err:  # noqa: BLE001

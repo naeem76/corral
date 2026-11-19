@@ -92,7 +92,7 @@ export interface Terminal {
 
 export class NotATerminalError extends Error {
   constructor(which: string) {
-    super(`${which} is not a terminal. Run nebula-enterprise in a terminal window (Windows Terminal, PowerShell), not with redirected input or output.`);
+    super(`${which} is not a terminal. Run corral in a terminal window (Windows Terminal, PowerShell), not with redirected input or output.`);
     this.name = 'NotATerminalError';
   }
 }

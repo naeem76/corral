@@ -1,11 +1,12 @@
-# nebula-enterprise
+# corral
 
 A terminal program that manages OpenCode and GitHub Copilot CLI sessions: a Projects column, a Git column
 (checkouts, worktrees, pull requests, and folders without Git), a Sessions column, and a pane
 that shows the OpenCode TUI. A second view, the inbox, shows the same sessions in sections
 with snooze and settle.
 
-It replaces Nebula (a Rust TUI) and T3 Code for a workplace where neither is permitted.
+It covers the core of Nebula (a Rust TUI) and the inbox of T3 Code for machines where only
+Node.js is available and neither of those tools is permitted.
 
 ## Hard constraints
 
@@ -61,7 +62,7 @@ docs/opencode-openapi-2.3.2.json   OpenAPI document of the service, saved from 2
   The file is absent when the service is stopped. `opencode service status` prints the URL or
   `stopped`; `opencode service start` starts it. The Windows location of this file is **not
   verified**; keep the lookup in one function with an environment override
-  (`NEBULA_OPENCODE_URL`, `NEBULA_OPENCODE_PASSWORD`, `NEBULA_OPENCODE_SERVICE_FILE`).
+  (`CORRAL_OPENCODE_URL`, `CORRAL_OPENCODE_PASSWORD`, `CORRAL_OPENCODE_SERVICE_FILE`).
 - Auth: HTTP Basic, user `opencode`, password from `service.json`. Without it: `401`.
   Never print, log or store the password. Never put it in a URL or in command arguments.
 - HTTP API under `/api`. See the OpenAPI file. Important operations:
@@ -132,15 +133,15 @@ The service on this machine holds the owner's real sessions.
 - Never stop or restart the service. Never run `opencode upgrade`.
 - Use a new scratch directory for every live test. Create sessions only there. Delete the
   sessions and PTYs that the test created. Never change or delete any other session.
-- Live tests are opt-in: they run only when `NEBULA_LIVE=1` is set. The default test run must
+- Live tests are opt-in: they run only when `CORRAL_LIVE=1` is set. The default test run must
   pass with the service stopped.
 - Do not send prompts to a model in tests. That costs money.
 
 ## Product scope (stage 1)
 
-Reference for behavior and keys: the owner's Nebula fork at
-`/home/naeem/dev/Work-OSS-fixing/nebula` (read `docs/keys.md`, `README.md`). Take the ideas and
-the key bindings for the features in scope. Do not port the Rust code.
+Reference for behavior and keys: Nebula (https://github.com/AgentSystemLabs/nebula; read its
+`docs/keys.md` and `README.md`). Take the ideas and the key bindings for the features in scope.
+Do not port the Rust code.
 
 In scope: Projects column (add and remove folders, Git or not, order, scroll, filter), Git
 column (root checkout, worktrees: list, create, delete; branch; dirty mark; pull requests from
@@ -179,8 +180,8 @@ The program also lists, starts and resumes GitHub Copilot CLI sessions, next to 
 - The program must be useful on a machine that has only Copilot (no OpenCode at all).
 
 Own state: one JSON file (`state.json`) in the user data directory
-(`%LOCALAPPDATA%\nebula-enterprise` on Windows, `$XDG_STATE_HOME/nebula-enterprise` or
-`~/.local/state/nebula-enterprise` elsewhere; override: `NEBULA_STATE_DIR`). Write it
+(`%LOCALAPPDATA%\corral` on Windows, `$XDG_STATE_HOME/corral` or
+`~/.local/state/corral` elsewhere; override: `CORRAL_STATE_DIR`). Write it
 atomically (temporary file, then rename). Sessions stay in OpenCode; do not copy them.
 
 ## Code rules

@@ -58,7 +58,7 @@ async function fakeService(o: FakeOpts = {}): Promise<FakeServer & { sessions: M
     if (m === 'PUT /api/pty/pty_1') {
       if (r.body?.size?.cols === 100 && sock) {
         const s = sock as FakeSocket;
-        s.sendText(`NEBULA-DOCTOR-SIZE:${r.body.size.cols}x${r.body.size.rows}\r\n`);
+        s.sendText(`CORRAL-DOCTOR-SIZE:${r.body.size.cols}x${r.body.size.rows}\r\n`);
         pty = { status: 'exited', exitCode: o.exitCode ?? 7 };
         setTimeout(() => s.close(1000), 20);
       }
@@ -101,10 +101,10 @@ async function fakeService(o: FakeOpts = {}): Promise<FakeServer & { sessions: M
   fake.onSocket = (s) => {
     sock = s;
     s.sendBinary(Buffer.concat([Buffer.from([0]), Buffer.from('{"cursor":0}')]));
-    s.sendText('NEBULA-DOCTOR-READY:80x24\r\n');
+    s.sendText('CORRAL-DOCTOR-READY:80x24\r\n');
     s.onMessage = (msg) => {
       const t = msg.data.toString('utf8');
-      if (t.includes('\r')) s.sendText(`ping-123\r\nNEBULA-DOCTOR-ECHO:${t.trim()}\r\nNEBULA-DOCTOR-WAITING\r\n`);
+      if (t.includes('\r')) s.sendText(`ping-123\r\nCORRAL-DOCTOR-ECHO:${t.trim()}\r\nCORRAL-DOCTOR-WAITING\r\n`);
     };
   };
   return Object.assign(fake, { sessions, ptys });
@@ -148,7 +148,7 @@ async function deps(fake: FakeServer | null, over: Partial<DoctorDeps> = {}, sta
   const svcFile = path.join(TMP, '.local', 'state', 'opencode', 'service.json');
   const resolve = fakeResolve({ opencode: { ok: true, path: '/opt/oc/opencode' } });
   const d: Partial<DoctorDeps> = {
-    env: { NO_COLOR: '1', TERM: 'xterm-256color', NEBULA_STATE_DIR: stateDir ?? path.join(TMP, 'unused-state') },
+    env: { NO_COLOR: '1', TERM: 'xterm-256color', CORRAL_STATE_DIR: stateDir ?? path.join(TMP, 'unused-state') },
     platform: process.platform === 'win32' ? 'win32' : 'linux',
     homedir: TMP,
     tmpdir: TMP,
@@ -174,7 +174,7 @@ function assertNoSecret(text: string): void {
 }
 
 async function leftovers(): Promise<string[]> {
-  return (await readdir(TMP)).filter((n) => n.startsWith('nebula-doctor-'));
+  return (await readdir(TMP)).filter((n) => n.startsWith('corral-doctor-'));
 }
 
 function line(text: string, name: string): string {
@@ -203,7 +203,7 @@ test('doctor: all checks pass against a fake service', async () => {
     assert.ok(!/\x1b\[/.test(t), 'no color with NO_COLOR');
     assertNoSecret(t);
     // The scratch dir lies under the fake home (the temp dir): printed with ~.
-    assert.match(line(t, 'Scratch directory'), /~[\\/]nebula-doctor-/);
+    assert.match(line(t, 'Scratch directory'), /~[\\/]corral-doctor-/);
     assert.ok(!t.includes(TMP + path.sep), 'home prefix replaced');
   } finally {
     await fake.close();
@@ -269,7 +269,7 @@ test('doctor --json: shape, no secret, home replaced; --full-paths keeps the hom
     const { d, stdout } = await deps(fake);
     const code = await runDoctor(['--json', '--only', 'runtime,service,pty'], d);
     const j = JSON.parse(stdout.text) as { tool: string; results: CheckResult[]; summary: Record<string, number>; exitCode: number; version: string };
-    assert.equal(j.tool, 'nebula-enterprise doctor');
+    assert.equal(j.tool, 'corral doctor');
     assert.equal(j.exitCode, code);
     assert.deepEqual(Object.keys(j.summary).sort(), ['fail', 'pass', 'skip', 'warn']);
     assert.ok(j.results.length > 10);
@@ -480,7 +480,7 @@ test('visible / describeEvent / pathForms', () => {
 
 test('doctor: Copilot is optional; missing, it is a WARN and the run passes', async () => {
   const { d, stdout } = await deps(null, {
-    env: { NO_COLOR: '1', NEBULA_COPILOT_HOME: path.join(TMP, 'no-such-copilot-home') },
+    env: { NO_COLOR: '1', CORRAL_COPILOT_HOME: path.join(TMP, 'no-such-copilot-home') },
     copilot: () => ({ ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' }),
   });
   const code = await runDoctor(['--only', 'copilot'], d);

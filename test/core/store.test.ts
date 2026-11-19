@@ -8,7 +8,7 @@ import { Store } from '../../src/core/store.ts';
 const made: string[] = [];
 after(() => Promise.all(made.map((d) => rm(d, { recursive: true, force: true }))));
 const tmp = async () => {
-  const d = await mkdtemp(path.join(os.tmpdir(), 'nebula-store-'));
+  const d = await mkdtemp(path.join(os.tmpdir(), 'corral-store-'));
   made.push(d);
   return d;
 };

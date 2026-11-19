@@ -28,7 +28,7 @@ async function oneSession(opts: Parameters<typeof harness>[0] = {}): Promise<{ h
   return { h, dir, id };
 }
 
-test('stale PTY cleanup deletes only dead-pid nebula-enterprise PTYs', async () => {
+test('stale PTY cleanup deletes only dead-pid corral PTYs', async () => {
   const service = new FakeService();
   let dir = '';
   const extra = '/elsewhere/recorded';
@@ -39,11 +39,11 @@ test('stale PTY cleanup deletes only dead-pid nebula-enterprise PTYs', async () 
     ensureService: async () => {
       // Fill the PTY list just before the app looks at it.
       service.ptys.push(
-        { id: 'pty_dead', title: 'nebula-enterprise:111:ses_a', dir },
-        { id: 'pty_alive', title: 'nebula-enterprise:777:ses_b', dir },
+        { id: 'pty_dead', title: 'corral:111:ses_a', dir },
+        { id: 'pty_alive', title: 'corral:777:ses_b', dir },
         { id: 'pty_user', title: 'my shell', dir },
-        { id: 'pty_other', title: 'nebula-enterprise-x:111:ses_c', dir },
-        { id: 'pty_rec', title: 'nebula-enterprise:222:ses_d', dir: extra },
+        { id: 'pty_other', title: 'corral-x:111:ses_c', dir },
+        { id: 'pty_rec', title: 'corral:222:ses_d', dir: extra },
       );
     },
     setupState: async (store, d) => {

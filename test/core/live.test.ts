@@ -1,4 +1,4 @@
-// Live tests against the real OpenCode service. Opt-in: NEBULA_LIVE=1.
+// Live tests against the real OpenCode service. Opt-in: CORRAL_LIVE=1.
 // Safety: a new scratch directory for each test; only sessions and PTYs made here are
 // changed or deleted; no prompt is sent to a model; the service is never stopped.
 
@@ -21,17 +21,17 @@ async function caught(p: Promise<unknown>): Promise<OpenCodeError> {
   );
 }
 
-const skip = process.env.NEBULA_LIVE === '1' ? false : 'set NEBULA_LIVE=1 to run live tests';
+const skip = process.env.CORRAL_LIVE === '1' ? false : 'set CORRAL_LIVE=1 to run live tests';
 
 // A fixed name: OpenCode keeps a project record per directory and cannot delete one.
 async function scratch(): Promise<string> {
-  const dir = path.join(os.tmpdir(), 'nebula-live-scratch');
+  const dir = path.join(os.tmpdir(), 'corral-live-scratch');
   try {
     await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { mode: 0o700 });
     return await realpath(dir);
   } catch {
-    return realpath(await mkdtemp(path.join(os.tmpdir(), 'nebula-live-')));
+    return realpath(await mkdtemp(path.join(os.tmpdir(), 'corral-live-')));
   }
 }
 
@@ -44,7 +44,7 @@ test('live: PTY round trip with a Node one-liner', { skip, timeout: 30_000 }, as
     "process.stdout.on('resize', () => process.stdout.write('SIZE ' + process.stdout.columns + 'x' + process.stdout.rows + '\\r\\n'));",
     "process.stdin.on('data', (d) => { const s = d.toString(); process.stdout.write('ECHO ' + JSON.stringify(s) + '\\r\\n'); if (s.includes('q')) process.exit(5); });",
   ].join('');
-  const pty = await openPty(client, { command: process.execPath, args: ['-e', script], cwd: dir, cols: 90, rows: 25, title: 'nebula-live' });
+  const pty = await openPty(client, { command: process.execPath, args: ['-e', script], cwd: dir, cols: 90, rows: 25, title: 'corral-live' });
   let out = '';
   let exit: any = null;
   pty.onData = (d) => (out += d);
@@ -75,7 +75,7 @@ test('live: session create, rename, archive, remove through the tracker', { skip
     await waitFor(() => tracker.connected, 10_000, 'event stream');
     await tracker.watch([dir]);
     assert.deepEqual(tracker.rows(dir), []);
-    const id = await tracker.create(dir, 'nebula live test');
+    const id = await tracker.create(dir, 'corral live test');
     created.push(id);
     assert.equal(tracker.rows(dir)[0]?.id, id);
     assert.equal(tracker.rows(dir)[0]?.status, 'idle');

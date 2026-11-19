@@ -39,13 +39,13 @@ export function resolveCopilotLaunch(opts: CopilotLaunchOptions = {}): CopilotLa
   const resolve = opts.resolve ?? ((n: string) => resolveExecutable(n, { env, platform }));
   const p = platform === 'win32' ? path.win32 : path.posix;
 
-  const override = envGet(env, 'NEBULA_COPILOT_BIN', platform);
+  const override = envGet(env, 'CORRAL_COPILOT_BIN', platform);
   if (override) {
     const file = p.resolve(override);
-    if (!exists(file)) return { ok: false, reason: `NEBULA_COPILOT_BIN points to a missing file: ${file}` };
+    if (!exists(file)) return { ok: false, reason: `CORRAL_COPILOT_BIN points to a missing file: ${file}` };
     const ext = p.extname(file).toLowerCase();
     if (platform === 'win32' && ext !== '.exe' && ext !== '.com') {
-      return { ok: false, reason: `NEBULA_COPILOT_BIN must name a .exe on Windows (a script needs a shell): ${file}` };
+      return { ok: false, reason: `CORRAL_COPILOT_BIN must name a .exe on Windows (a script needs a shell): ${file}` };
     }
     return { ok: true, kind: 'override', command: file, args: [] };
   }

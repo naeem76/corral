@@ -27,7 +27,7 @@ export type { AppDeps, AppSessions, AppStore, TerminalLike } from './app.ts';
 
 export async function runApp(argv: string[]): Promise<number> {
   if (argv.length > 0) {
-    process.stderr.write(`nebula-enterprise: unknown argument: ${argv[0]}\nRun with --help for the usage.\n`);
+    process.stderr.write(`corral: unknown argument: ${argv[0]}\nRun with --help for the usage.\n`);
     return 2;
   }
   const env = process.env;
@@ -43,7 +43,7 @@ export async function runApp(argv: string[]): Promise<number> {
   };
   const client = new OpenCodeClient({ discover });
   const redact = ((r1: (t: string) => string) => (t: string) => client.redact(r1(t)))(makeRedactor(() => [password]));
-  const log = createLogger({ file: envGet(env, 'NEBULA_LOG', platform), redact });
+  const log = createLogger({ file: envGet(env, 'CORRAL_LOG', platform), redact });
 
   const git = createGit();
   const store = new Store({
@@ -54,7 +54,7 @@ export async function runApp(argv: string[]): Promise<number> {
   try {
     await store.load();
   } catch (err) {
-    process.stderr.write(`nebula-enterprise: cannot read ${store.file}: ${(err as Error).message}\n`);
+    process.stderr.write(`corral: cannot read ${store.file}: ${(err as Error).message}\n`);
     return 1;
   }
   if (store.recoveredFrom) log(`state.json was corrupt; moved to ${store.recoveredFrom}`);
@@ -84,7 +84,7 @@ export async function runApp(argv: string[]): Promise<number> {
     terminal = openTerminal({ stdin: process.stdin, stdout: process.stdout, proc });
   } catch (err) {
     if (err instanceof NotATerminalError) {
-      process.stderr.write(`nebula-enterprise: ${err.message}\n`);
+      process.stderr.write(`corral: ${err.message}\n`);
       return 1;
     }
     throw err;
@@ -122,7 +122,7 @@ export async function runApp(argv: string[]): Promise<number> {
     else {
       const r = resolveExecutable('opencode');
       // A shim counts: the user may start the service by hand, so its absence is an error.
-      yes = r.ok || r.reason === 'shim' || !!envGet(env, 'NEBULA_OPENCODE_URL', platform);
+      yes = r.ok || r.reason === 'shim' || !!envGet(env, 'CORRAL_OPENCODE_URL', platform);
     }
     installedAt.set(agent, { at: Date.now(), yes });
     return yes;

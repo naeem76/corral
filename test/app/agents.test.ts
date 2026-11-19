@@ -10,9 +10,9 @@ import {
   FakeService, finishedTurn, harness, modal, until, writeCopilotSession, type Harness, type HarnessOptions,
 } from './helpers.ts';
 
-/** Print a screen for review: NEBULA_SHOW_SCREENS=1. */
+/** Print a screen for review: CORRAL_SHOW_SCREENS=1. */
 function show(lines: string[]): void {
-  if (process.env.NEBULA_SHOW_SCREENS === '1') console.log(lines.join('\n'));
+  if (process.env.CORRAL_SHOW_SCREENS === '1') console.log(lines.join('\n'));
 }
 
 const CP1 = 'c0c0c0c0-1111-4111-8111-111111111111';
@@ -74,8 +74,14 @@ test('agents: both agents in one Sessions column, tagged, in one attention order
   const { h } = await both();
   try {
     await h.type('ll');
+    // Both sources fill in asynchronously: wait for the full screen, not for a fixed time.
+    const titles = ['copilot asks', 'opencode new', 'copilot finished', 'opencode old'];
+    await until(() => {
+      const now = h.text();
+      return titles.every((s) => now.includes(s)) && /Agent {5}Copilot/.test(now) && /● OpenCode · Copilot/.test(now) && / cp /.test(now) && / oc /.test(now);
+    }, 3000, 'both agents on the screen');
     const t = h.text();
-    const order = ['copilot asks', 'opencode new', 'copilot finished', 'opencode old'].map((s) => t.indexOf(s));
+    const order = titles.map((s) => t.indexOf(s));
     assert.ok(order.every((i) => i >= 0), t);
     assert.deepEqual([...order].sort((a, b) => a - b), order, 'needs input, unseen (newest first), idle');
     const tags: Array<[string, string]> = [['copilot asks', 'cp'], ['opencode new', 'oc'], ['copilot finished', 'cp'], ['opencode old', 'oc']];
@@ -143,7 +149,7 @@ test('agents: n opens a menu with the default first; the choice starts Copilot i
     const id = spawn.args[1] as string;
     assert.match(id, /^[0-9a-f-]{36}$/);
     assert.equal(spawn.cwd, dir);
-    assert.match(spawn.title ?? '', new RegExp(`^nebula-enterprise:4242:${id}$`));
+    assert.match(spawn.title ?? '', new RegExp(`^corral:4242:${id}$`));
     assert.equal(h.store.ui.defaultAgent, 'copilot');
     assert.equal(h.app.focus, 'pane');
     assert.equal(h.app.selectedSession()?.id, id);

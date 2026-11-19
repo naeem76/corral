@@ -92,7 +92,7 @@ export function createLauncher(deps: LauncherDeps): Launcher {
       const shimNote = !r.ok && r.reason === 'shim' ? describeResolveFailure('opencode', r) : null;
       const service = await deps.serviceVersion().catch(() => undefined);
       if (service === undefined) {
-        // Nothing to compare with (for example NEBULA_OPENCODE_URL is set). Allow it.
+        // Nothing to compare with (for example CORRAL_OPENCODE_URL is set). Allow it.
         return { ok: true, command, shimNote, runnableHere: r.ok };
       }
       if (!r.ok) {

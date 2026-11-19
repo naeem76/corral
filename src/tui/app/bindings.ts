@@ -1,7 +1,7 @@
 // The one table of key bindings. The footer hints and the help overlay are both generated
 // from it, so what the user reads is what the dispatcher does.
 //
-// Keys follow the owner's Nebula keymap where the feature is in scope. Every key here must be
+// Keys follow the Nebula keymap where the feature is in scope. Every key here must be
 // encodable by a legacy terminal (Windows Terminal without the kitty protocol), so no
 // Ctrl+Shift+letter and no Cmd.
 

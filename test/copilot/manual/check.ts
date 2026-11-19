@@ -37,7 +37,7 @@ function check(ok: boolean, what: string): void {
   process.stdout.write(`${ok ? 'PASS' : 'FAIL'}  ${what}\n`);
 }
 
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'neb-copilot-check-'));
+const scratch = await mkdtemp(path.join(os.tmpdir(), 'corral-copilot-check-'));
 const home = path.join(scratch, 'home');
 const proj = path.join(scratch, 'proj');
 await mkdir(home);

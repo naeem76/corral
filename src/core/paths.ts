@@ -26,16 +26,16 @@ export function envGet(env: Env, name: string, platform: NodeJS.Platform): strin
 /** Directory of the program's own state (`state.json`). */
 export function stateDir(env: Env, platform: NodeJS.Platform, homedir: string): string {
   const p = api(platform);
-  const override = envGet(env, 'NEBULA_STATE_DIR', platform);
+  const override = envGet(env, 'CORRAL_STATE_DIR', platform);
   if (override) return p.resolve(override);
   if (platform === 'win32') {
     const local = envGet(env, 'LOCALAPPDATA', platform) ?? p.join(homedir, 'AppData', 'Local');
-    return p.join(local, 'nebula-enterprise');
+    return p.join(local, 'corral');
   }
   const xdg = envGet(env, 'XDG_STATE_HOME', platform);
   // XDG says a relative value is invalid and must be ignored.
-  if (xdg && p.isAbsolute(xdg)) return p.join(xdg, 'nebula-enterprise');
-  return p.join(homedir, '.local', 'state', 'nebula-enterprise');
+  if (xdg && p.isAbsolute(xdg)) return p.join(xdg, 'corral');
+  return p.join(homedir, '.local', 'state', 'corral');
 }
 
 /**
@@ -74,7 +74,7 @@ export function trimTrailingSep(p: string, platform: NodeJS.Platform): string {
  */
 export function serviceFileCandidates(env: Env, platform: NodeJS.Platform, homedir: string): string[] {
   const p = api(platform);
-  const override = envGet(env, 'NEBULA_OPENCODE_SERVICE_FILE', platform);
+  const override = envGet(env, 'CORRAL_OPENCODE_SERVICE_FILE', platform);
   if (override) return [p.resolve(override)];
   return opencodeStateDirs(env, platform, homedir).map((d) => p.join(d, 'service.json'));
 }
@@ -103,12 +103,12 @@ export function opencodeStateDirs(env: Env, platform: NodeJS.Platform, homedir: 
 
 /**
  * Home folder of the GitHub Copilot CLI (holds `session-state/`).
- * `NEBULA_COPILOT_HOME` first (to point this program elsewhere without moving Copilot), then
+ * `CORRAL_COPILOT_HOME` first (to point this program elsewhere without moving Copilot), then
  * Copilot's own `COPILOT_HOME`, then `~/.copilot`. Copilot ignores the XDG variables.
  */
 export function copilotHome(env: Env, platform: NodeJS.Platform, homedir: string): string {
   const p = api(platform);
-  const own = envGet(env, 'NEBULA_COPILOT_HOME', platform);
+  const own = envGet(env, 'CORRAL_COPILOT_HOME', platform);
   if (own) return p.resolve(own);
   const cp = envGet(env, 'COPILOT_HOME', platform);
   if (cp) return p.resolve(cp);

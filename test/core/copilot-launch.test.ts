@@ -62,12 +62,12 @@ test('copilot launch, Windows: only a shim, nothing behind it', () => {
   assert.deepEqual(none, { ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' });
 });
 
-test('copilot launch: NEBULA_COPILOT_BIN overrides; a script is refused on Windows', () => {
-  const ok = win(['D:\\tools\\copilot.exe'], { NEBULA_COPILOT_BIN: 'D:\\tools\\copilot.exe' });
+test('copilot launch: CORRAL_COPILOT_BIN overrides; a script is refused on Windows', () => {
+  const ok = win(['D:\\tools\\copilot.exe'], { CORRAL_COPILOT_BIN: 'D:\\tools\\copilot.exe' });
   assert.deepEqual(ok, { ok: true, kind: 'override', command: 'D:\\tools\\copilot.exe', args: [] });
-  const missing = win([], { NEBULA_COPILOT_BIN: 'D:\\tools\\copilot.exe' });
+  const missing = win([], { CORRAL_COPILOT_BIN: 'D:\\tools\\copilot.exe' });
   assert.match(!missing.ok ? missing.reason : '', /missing file/);
-  const script = win(['D:\\tools\\copilot.cmd'], { NEBULA_COPILOT_BIN: 'D:\\tools\\copilot.cmd' });
+  const script = win(['D:\\tools\\copilot.cmd'], { CORRAL_COPILOT_BIN: 'D:\\tools\\copilot.cmd' });
   assert.match(!script.ok ? script.reason : '', /must name a \.exe/);
 });
 

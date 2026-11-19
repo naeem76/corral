@@ -34,7 +34,7 @@ test('Enter opens a pane: output lands inside the pane rectangle, keys reach the
     assert.equal(pty.spawn.command, '/usr/bin/opencode');
     assert.deepEqual(pty.spawn.args, ['--session', ids[0]]);
     assert.equal(pty.spawn.cwd, dir);
-    assert.equal(pty.spawn.title, `nebula-enterprise:4242:${ids[0]}`);
+    assert.equal(pty.spawn.title, `corral:4242:${ids[0]}`);
     assert.equal(h.app.focus, 'pane');
     const lay = h.app.layout();
     const inner = lay.paneInner!;

@@ -28,8 +28,8 @@ test('device attributes', () => {
 });
 
 test('XTVERSION', () => {
-  assert.deepEqual(replies(`${CSI}>0q`), [`${ESC}P>|nebula-enterprise${ST}`]);
-  assert.deepEqual(replies(`${CSI}>q`), [`${ESC}P>|nebula-enterprise${ST}`]);
+  assert.deepEqual(replies(`${CSI}>0q`), [`${ESC}P>|corral${ST}`]);
+  assert.deepEqual(replies(`${CSI}>q`), [`${ESC}P>|corral${ST}`]);
 });
 
 test('DECRQM for DEC private modes', () => {

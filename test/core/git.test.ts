@@ -55,7 +55,7 @@ test('missing git: projects act as plain folders', async () => {
 });
 
 async function makeRepo(): Promise<{ root: string; repo: string; git: (...a: string[]) => Promise<string> }> {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nebula-git-')));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'corral-git-')));
   made.push(root);
   const repo = path.join(root, 'my repo');
   await mkdir(repo);
@@ -122,7 +122,7 @@ test('real git: detectKind, list, create, status, detached, remove', { skip }, a
 });
 
 test('real git: a dir project has one root row', { skip }, async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'nebula-dir-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'corral-dir-'));
   made.push(dir);
   const g = createGit();
   assert.equal(await g.detectKind(dir), 'dir');

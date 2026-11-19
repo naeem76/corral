@@ -1,4 +1,4 @@
-// Optional debug log (NEBULA_LOG=<path>). Lines are redacted before they are queued, and the
+// Optional debug log (CORRAL_LOG=<path>). Lines are redacted before they are queued, and the
 // writes are asynchronous so a slow disk never blocks a key handler.
 
 import { appendFile } from 'node:fs/promises';

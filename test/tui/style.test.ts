@@ -33,7 +33,7 @@ test('detectColorDepth', () => {
   assert.equal(detectColorDepth({ COLORTERM: 'truecolor', TERM: 'xterm-256color' }), 'truecolor');
   assert.equal(detectColorDepth({ TERM: 'xterm-256color' }), '256');
   assert.equal(detectColorDepth({ TERM: 'linux' }), '16');
-  assert.equal(detectColorDepth({ NEBULA_COLOR_DEPTH: '16', WT_SESSION: 'x' }), '16');
+  assert.equal(detectColorDepth({ CORRAL_COLOR_DEPTH: '16', WT_SESSION: 'x' }), '16');
   assert.equal(detectColorDepth({}), 'truecolor');
 });
 

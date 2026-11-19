@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Entry point. Owner: the planner. Each command loads only the code it needs.
 //
-//   nebula-enterprise            start the TUI
-//   nebula-enterprise doctor     check this machine (OpenCode, service, PTY, Git, terminal)
+//   corral            start the TUI
+//   corral doctor     check this machine (OpenCode, service, PTY, Git, terminal)
 
-const USAGE = `nebula-enterprise - session manager for OpenCode
+const USAGE = `corral - session manager for OpenCode
 
 Usage:
   node src/main.ts [options]      start the TUI
@@ -40,7 +40,7 @@ main(process.argv.slice(2)).then(
     process.exitCode = code;
   },
   (err: unknown) => {
-    process.stderr.write(`nebula-enterprise: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`corral: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;
   },
 );

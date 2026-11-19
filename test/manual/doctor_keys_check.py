@@ -101,7 +101,7 @@ def main():
         except ChildProcessError:
             pass
     text = out.decode("utf8", "replace")
-    report = text[text.rfind("nebula-enterprise doctor ") :] if "Summary:" in text else text
+    report = text[text.rfind("corral doctor ") :] if "Summary:" in text else text
     print(report)
     check(step == len(STEPS), "every prompt appeared and was answered")
     check("Keys: Arrow key" in report and "key up (ESC [ A)" in report, "arrow key decoded")

@@ -350,7 +350,7 @@ async function fixedScratch(base: string, name: string): Promise<string> {
 
 function getScratch(ctx: Ctx) {
   ctx.scratch ??= (async () => {
-    const dir = await fixedScratch(ctx.d.tmpdir, 'nebula-doctor-scratch');
+    const dir = await fixedScratch(ctx.d.tmpdir, 'corral-doctor-scratch');
     ctx.scratchDirs.push(dir);
     // OpenCode keys sessions by the directory string; use the canonical form.
     return fsp.realpath(dir).catch(() => dir);
@@ -458,12 +458,12 @@ async function groupService(ctx: Ctx): Promise<void> {
       if (ok && !found) found = c;
       notes.push(`${ok ? 'exists ' : 'missing'}  ${c}${ok && found === c ? '   <- used' : ''}`);
     }
-    if (d.env.NEBULA_OPENCODE_URL) return pass('NEBULA_OPENCODE_URL is set; the service file is not used', notes);
+    if (d.env.CORRAL_OPENCODE_URL) return pass('CORRAL_OPENCODE_URL is set; the service file is not used', notes);
     if (found) return pass(`found: ${found}`, notes);
-    return fail('no service.json in any known place', 'run `opencode service start`, then run doctor again; if it still fails, find service.json and set NEBULA_OPENCODE_SERVICE_FILE', notes);
+    return fail('no service.json in any known place', 'run `opencode service start`, then run doctor again; if it still fails, find service.json and set CORRAL_OPENCODE_SERVICE_FILE', notes);
   });
   await r.check('Environment overrides', 1000, () => {
-    const names = Object.keys(d.env).filter((k) => /^NEBULA_/i.test(k)).sort();
+    const names = Object.keys(d.env).filter((k) => /^CORRAL_/i.test(k)).sort();
     return pass(names.length ? `in use (names only): ${names.join(', ')}` : 'none');
   });
   const svc = await getService(ctx);
@@ -571,15 +571,15 @@ async function groupEvents(ctx: Ctx): Promise<void> {
 const PTY_SCRIPT = [
   'o=process.stdout;N=String.fromCharCode(13,10);',
   'w=()=>o.getWindowSize?o.getWindowSize():[o.columns,o.rows];s=w();',
-  "o.write('NEBULA-DOCTOR-READY:'+s[0]+'x'+s[1]+N);",
+  "o.write('CORRAL-DOCTOR-READY:'+s[0]+'x'+s[1]+N);",
   "b='';e=0;process.stdin.setEncoding('utf8');",
   'process.stdin.on(\'data\',d=>{if(e)return;b+=d;',
   'k=[b.indexOf(String.fromCharCode(13)),b.indexOf(String.fromCharCode(10))].filter(x=>x>=0);',
   'if(!k.length)return;e=1;',
-  "o.write('NEBULA-DOCTOR-ECHO:'+b.slice(0,Math.min(...k))+N);",
-  "o.write('NEBULA-DOCTOR-WAITING'+N);s=w();t=Date.now();",
+  "o.write('CORRAL-DOCTOR-ECHO:'+b.slice(0,Math.min(...k))+N);",
+  "o.write('CORRAL-DOCTOR-WAITING'+N);s=w();t=Date.now();",
   'p=setInterval(()=>{z=w();if(z[0]!==s[0]||z[1]!==s[1]||Date.now()-t>8000){clearInterval(p);',
-  "o.write('NEBULA-DOCTOR-SIZE:'+z[0]+'x'+z[1]+N);setTimeout(()=>process.exit(7),300)}},100)});",
+  "o.write('CORRAL-DOCTOR-SIZE:'+z[0]+'x'+z[1]+N);setTimeout(()=>process.exit(7),300)}},100)});",
 ].join('');
 
 export { PTY_SCRIPT };
@@ -609,7 +609,7 @@ async function groupPty(ctx: Ctx): Promise<void> {
   const errors: string[] = [];
   try {
     const created = await r.check(names[1] as string, 15_000, async () => {
-      pty = await openPty(svc.client, { command: d.execPath, args: ['-e', PTY_SCRIPT], cwd: dir, cols: 80, rows: 24, title: 'nebula-doctor' }, {
+      pty = await openPty(svc.client, { command: d.execPath, args: ['-e', PTY_SCRIPT], cwd: dir, cols: 80, rows: 24, title: 'corral-doctor' }, {
         webSocket: d.webSocket,
         onError: (e) => errors.push(e.message),
       });
@@ -622,8 +622,8 @@ async function groupPty(ctx: Ctx): Promise<void> {
     } else {
       const p = pty as Awaited<ReturnType<typeof openPty>>;
       const ready = await r.check(names[2] as string, 15_000, async () => {
-        if (await waitUntil(() => out.includes('NEBULA-DOCTOR-READY:'), ms(ctx, 10_000))) {
-          const m = /NEBULA-DOCTOR-READY:(\d+)x(\d+)/.exec(out);
+        if (await waitUntil(() => out.includes('CORRAL-DOCTOR-READY:'), ms(ctx, 10_000))) {
+          const m = /CORRAL-DOCTOR-READY:(\d+)x(\d+)/.exec(out);
           return pass(`marker received; program saw ${m ? `${m[1]}x${m[2]}` : 'an unknown size'} at start`);
         }
         return fail(`no marker within 10 s${exit ? ` (exited: ${JSON.stringify(exit)})` : ''}; got ${out.length} chars${errors.length ? `; errors: ${errors.join('; ')}` : ''}`, 'send this output back');
@@ -633,17 +633,17 @@ async function groupPty(ctx: Ctx): Promise<void> {
       } else {
         await r.check(names[3] as string, 10_000, async () => {
           p.write('ping-123\r');
-          if (await waitUntil(() => out.includes('NEBULA-DOCTOR-ECHO:'), ms(ctx, 5000))) {
-            const ok = out.includes('NEBULA-DOCTOR-ECHO:ping-123');
+          if (await waitUntil(() => out.includes('CORRAL-DOCTOR-ECHO:'), ms(ctx, 5000))) {
+            const ok = out.includes('CORRAL-DOCTOR-ECHO:ping-123');
             return ok ? pass('line sent and echoed back') : warn('echo arrived with different text', 'send this output back');
           }
           return fail('no echo within 5 s', 'send this output back');
         });
         await r.check(names[4] as string, 15_000, async () => {
-          if (!(await waitUntil(() => out.includes('NEBULA-DOCTOR-WAITING'), ms(ctx, 3000)))) return skip('probe did not reach the resize step');
+          if (!(await waitUntil(() => out.includes('CORRAL-DOCTOR-WAITING'), ms(ctx, 3000)))) return skip('probe did not reach the resize step');
           p.resize(100, 30);
-          if (await waitUntil(() => out.includes('NEBULA-DOCTOR-SIZE:'), ms(ctx, 10_000))) {
-            const m = /NEBULA-DOCTOR-SIZE:(\d+)x(\d+)/.exec(out);
+          if (await waitUntil(() => out.includes('CORRAL-DOCTOR-SIZE:'), ms(ctx, 10_000))) {
+            const m = /CORRAL-DOCTOR-SIZE:(\d+)x(\d+)/.exec(out);
             const got = m ? `${m[1]}x${m[2]}` : '?';
             return got === '100x30' ? pass('program saw 100x30') : warn(`program saw ${got}, expected 100x30`, 'resize does not reach the program; send this output back');
           }
@@ -699,7 +699,7 @@ async function opencodePty(ctx: Ctx, client: OpenCodeClient, dir: string): Promi
       const rows = 30;
       const emu = createEmulator(cols, rows);
       let bytes = 0;
-      pty = await openPty(client, { command: cli.path as string, args: [], cwd: dir, cols, rows, title: 'nebula-doctor-opencode' }, { webSocket: d.webSocket });
+      pty = await openPty(client, { command: cli.path as string, args: [], cwd: dir, cols, rows, title: 'corral-doctor-opencode' }, { webSocket: d.webSocket });
       const p = pty;
       emu.onReply = (s) => p.write(s);
       p.onData = (s) => {
@@ -754,7 +754,7 @@ async function groupSessions(ctx: Ctx): Promise<void> {
   let removed = false;
   try {
     const c = await r.check(steps[0] as string, 10_000, async () => {
-      const v = await client.request<{ data: { id: string } }>('POST', '/api/session', { body: { location: { directory: dir }, title: 'nebula-doctor probe' }, timeoutMs: t });
+      const v = await client.request<{ data: { id: string } }>('POST', '/api/session', { body: { location: { directory: dir }, title: 'corral-doctor probe' }, timeoutMs: t });
       id = v.data.id;
       return pass(`${id} in the scratch directory`);
     });
@@ -784,9 +784,9 @@ async function groupSessions(ctx: Ctx): Promise<void> {
       return pass(`${found} of ${forms.length} forms return the session`, notes);
     });
     await r.check(steps[3] as string, 10_000, async () => {
-      await client.request('PATCH', `/api/session/${encodeURIComponent(sid)}`, { body: { title: 'nebula-doctor renamed' }, timeoutMs: t });
+      await client.request('PATCH', `/api/session/${encodeURIComponent(sid)}`, { body: { title: 'corral-doctor renamed' }, timeoutMs: t });
       const v = await client.request<{ data?: { title?: string } }>('GET', `/api/session/${encodeURIComponent(sid)}`, { timeoutMs: t });
-      return v?.data?.title === 'nebula-doctor renamed' ? pass('title changed') : warn('update accepted, but the title did not change', 'send this output back');
+      return v?.data?.title === 'corral-doctor renamed' ? pass('title changed') : warn('update accepted, but the title did not change', 'send this output back');
     });
     await r.check(steps[4] as string, 10_000, async () => {
       await client.request('PATCH', `/api/session/${encodeURIComponent(sid)}`, { body: { archived: true }, timeoutMs: t });
@@ -861,7 +861,7 @@ async function groupGit(ctx: Ctx): Promise<void> {
   const g = gitPath as string;
   let root = '';
   try {
-    root = await fsp.mkdtemp(path.join(d.tmpdir, 'nebula-doctor-git-'));
+    root = await fsp.mkdtemp(path.join(d.tmpdir, 'corral-doctor-git-'));
     root = await fsp.realpath(root).catch(() => root);
   } catch (err) {
     for (const s of steps) r.add(s, skip(`cannot create a temp folder: ${errText(err)}`));
@@ -882,7 +882,7 @@ async function groupGit(ctx: Ctx): Promise<void> {
       await fsp.mkdir(repo);
       await runGit(['init', '-q']);
       // Only this temporary repository's config is changed.
-      await runGit(['config', 'user.name', 'nebula doctor']);
+      await runGit(['config', 'user.name', 'corral doctor']);
       await runGit(['config', 'user.email', 'doctor@example.invalid']);
       await runGit(['config', 'commit.gpgsign', 'false']);
       await runGit(['commit', '-q', '--allow-empty', '--no-verify', '-m', 'doctor']);
@@ -927,7 +927,7 @@ const OPENCODE_GROUPS = new Set(['cli', 'service', 'events', 'pty', 'sessions'])
 /** OpenCode is not installed at all, and Copilot can start: the program runs in "Copilot only" mode. */
 function copilotOnly(d: DoctorDeps): boolean {
   const oc = d.resolve('opencode');
-  if (oc.ok || oc.reason !== 'not-found' || d.env.NEBULA_OPENCODE_URL) return false;
+  if (oc.ok || oc.reason !== 'not-found' || d.env.CORRAL_OPENCODE_URL) return false;
   const launch = (d.copilot ?? (() => resolveCopilotLaunch({ env: d.env, platform: d.platform, arch: d.arch, execPath: d.execPath, resolve: d.resolve, exists: existsSync })))();
   return launch.ok;
 }
@@ -943,7 +943,7 @@ function optionalOpenCode(c: CheckResult): CheckResult {
 // ---------------------------------------------------------------------------
 
 const LAUNCH_TEXT: Record<string, string> = {
-  override: 'NEBULA_COPILOT_BIN',
+  override: 'CORRAL_COPILOT_BIN',
   exe: 'a real program on PATH',
   native: 'the native program behind the npm shim',
   loader: 'node + npm-loader.js behind the npm shim',
@@ -981,7 +981,7 @@ async function groupCopilot(ctx: Ctx): Promise<void> {
       return pass(`${home} (session-state readable)`);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return warn(`${home}: no session-state folder`, 'optional: no Copilot session on this machine yet (or set COPILOT_HOME / NEBULA_COPILOT_HOME)');
+      if (code === 'ENOENT') return warn(`${home}: no session-state folder`, 'optional: no Copilot session on this machine yet (or set COPILOT_HOME / CORRAL_COPILOT_HOME)');
       return warn(`${state}: ${errText(err)}`, 'check the permissions of the folder');
     }
   });
@@ -1096,7 +1096,7 @@ async function groupState(ctx: Ctx): Promise<void> {
       await fsp.rm(fin, { force: true }).catch(() => {});
     }
     return pass(`${dir} (write + rename work)`);
-  }, 'set NEBULA_STATE_DIR to a writable folder');
+  }, 'set CORRAL_STATE_DIR to a writable folder');
 }
 
 // ---------------------------------------------------------------------------
@@ -1160,7 +1160,7 @@ export async function runKeysCheck(d: DoctorDeps): Promise<CheckResult[]> {
   const add = (name: string, o: Outcome) => out.push({ group: 'terminal', name: `Keys: ${name}`, ...o });
   try {
     const say = (text: string) => term.write(text.replace(/\n/g, '\r\n'));
-    say('\x1b[H\x1b[2Jnebula-enterprise doctor --keys\n\nEach step waits 10 s. Press s to skip a step, Ctrl+C to stop.\n\n');
+    say('\x1b[H\x1b[2Jcorral doctor --keys\n\nEach step waits 10 s. Press s to skip a step, Ctrl+C to stop.\n\n');
     let aborted = false;
     for (const step of KEY_STEPS) {
       if (aborted) {
@@ -1291,7 +1291,7 @@ export async function runDoctor(args: string[], deps: Partial<DoctorDeps> = {}):
   }
   const r = new Report(d.timeScale);
   const ctx: Ctx = { d, flags, r, secrets: new Set(), cli: null, service: null, auth: null, serviceVersion: null, scratch: null, scratchDirs: [] };
-  for (const name of ['NEBULA_OPENCODE_PASSWORD']) {
+  for (const name of ['CORRAL_OPENCODE_PASSWORD']) {
     const v = d.env[name];
     if (v) ctx.secrets.add(v);
   }
@@ -1339,13 +1339,13 @@ export async function runDoctor(args: string[], deps: Partial<DoctorDeps> = {}):
   let text: string;
   if (flags.json) {
     text = JSON.stringify(
-      { tool: 'nebula-enterprise doctor', version: d.version, platform: d.platform, arch: d.arch, results, summary: s, exitCode: code },
+      { tool: 'corral doctor', version: d.version, platform: d.platform, arch: d.arch, results, summary: s, exitCode: code },
       null,
       2,
     ) + '\n';
   } else {
     const color = !!d.stdout.isTTY && d.env.NO_COLOR === undefined;
-    text = formatText(results, `nebula-enterprise doctor ${d.version} (${d.platform} ${d.arch}, Node ${d.nodeVersion})`, color);
+    text = formatText(results, `corral doctor ${d.version} (${d.platform} ${d.arch}, Node ${d.nodeVersion})`, color);
   }
   // Last net: scrub the whole text again (a secret could be split across fields only in theory).
   for (const sec of ctx.secrets) if (sec.length >= 4) text = text.split(sec).join('***');

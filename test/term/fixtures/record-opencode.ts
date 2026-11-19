@@ -23,11 +23,11 @@ const SIZES: Array<[number, number]> = [
 ];
 
 function discover(): { url: string; password: string } {
-  const file = process.env.NEBULA_OPENCODE_SERVICE_FILE ?? join(homedir(), '.local', 'state', 'opencode', 'service.json');
+  const file = process.env.CORRAL_OPENCODE_SERVICE_FILE ?? join(homedir(), '.local', 'state', 'opencode', 'service.json');
   const svc = JSON.parse(readFileSync(file, 'utf8')) as { url: string; password: string };
   return {
-    url: process.env.NEBULA_OPENCODE_URL ?? svc.url,
-    password: process.env.NEBULA_OPENCODE_PASSWORD ?? svc.password,
+    url: process.env.CORRAL_OPENCODE_URL ?? svc.url,
+    password: process.env.CORRAL_OPENCODE_PASSWORD ?? svc.password,
   };
 }
 

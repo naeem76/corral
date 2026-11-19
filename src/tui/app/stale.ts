@@ -1,5 +1,5 @@
 // Remove PTYs that an earlier run of this program left in the service (after a crash or a
-// kill). Every PTY we create has the title `nebula-enterprise:<pid>:<sessionId>`; a PTY is
+// kill). Every PTY we create has the title `corral:<pid>:<sessionId>`; a PTY is
 // stale when that pid is no longer alive. PTYs without the prefix are never touched.
 //
 // `GET /api/pty` lists the PTYs of one location (directory) only; without a location it
@@ -8,7 +8,7 @@
 import type { OpenCodeApi } from '../../core/opencode.ts';
 import { locationQuery } from '../../core/opencode.ts';
 
-export const PTY_TITLE_PREFIX = 'nebula-enterprise:';
+export const PTY_TITLE_PREFIX = 'corral:';
 
 export function ptyTitle(pid: number, sessionId: string): string {
   return `${PTY_TITLE_PREFIX}${pid}:${sessionId}`;
@@ -17,7 +17,7 @@ export function ptyTitle(pid: number, sessionId: string): string {
 /** Pid of the program that created the PTY, or null when the title is not ours. */
 export function ptyOwner(title: unknown): number | null {
   if (typeof title !== 'string' || !title.startsWith(PTY_TITLE_PREFIX)) return null;
-  const m = /^nebula-enterprise:(\d+):/.exec(title);
+  const m = /^corral:(\d+):/.exec(title);
   return m ? Number(m[1]) : null;
 }
 

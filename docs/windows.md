@@ -73,7 +73,7 @@ first and ask it something small, so that there is something to read. Send the o
 The program reads Copilot's files only. It never writes them and never opens
 `session-store.db`.
 
-## A short command: `ne`
+## A short command: `corral`
 
 You do not need `cmd.exe` for this.
 
@@ -81,22 +81,22 @@ Option A: a function in your PowerShell profile. Open the profile with `notepad 
 (create the file if it does not exist) and add this line, with your own path:
 
 ```
-function ne { node "C:\path\to\nebula-enterprise\src\main.ts" @args }
+function corral { node "C:\path\to\corral\src\main.ts" @args }
 ```
 
-Open a new PowerShell window. Then `ne` starts the program and `ne doctor` runs the checks.
+Open a new PowerShell window. Then `corral` starts the program and `corral doctor` runs the checks.
 
-Option B: the launcher `bin\ne.ps1`. It finds `src\main.ts` from its own folder and passes all
+Option B: the launcher `bin\corral.ps1`. It finds `src\main.ts` from its own folder and passes all
 arguments through. Put the `bin` folder on PATH, or call it with its full path.
 
 The execution policy can block `$PROFILE` and every `.ps1` file. Then the full command always
 works:
 
 ```
-node C:\path\to\nebula-enterprise\src\main.ts
+node C:\path\to\corral\src\main.ts
 ```
 
 ## Files
 
-- The program state is in `%LOCALAPPDATA%\nebula-enterprise\state.json`.
-- If the OpenCode service file is in an unusual place, set `NEBULA_OPENCODE_SERVICE_FILE` to its path.
+- The program state is in `%LOCALAPPDATA%\corral\state.json`.
+- If the OpenCode service file is in an unusual place, set `CORRAL_OPENCODE_SERVICE_FILE` to its path.

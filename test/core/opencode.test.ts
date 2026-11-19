@@ -18,21 +18,21 @@ async function caught(p: Promise<unknown>): Promise<OpenCodeError> {
 const info = (url: string, password = PASSWORD): ServiceInfo => ({ url, password, source: 'test' });
 
 test('discovery: env override, then service.json', async () => {
-  assert.deepEqual(await discoverService({ env: { NEBULA_OPENCODE_URL: 'http://h:1/', NEBULA_OPENCODE_PASSWORD: 'p' } }), {
+  assert.deepEqual(await discoverService({ env: { CORRAL_OPENCODE_URL: 'http://h:1/', CORRAL_OPENCODE_PASSWORD: 'p' } }), {
     url: 'http://h:1',
     password: 'p',
     source: 'env',
   });
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'nebula-oc-'));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'corral-oc-'));
   const file = path.join(dir, 'service.json');
-  assert.equal(await discoverService({ env: { NEBULA_OPENCODE_SERVICE_FILE: file } }), null);
+  assert.equal(await discoverService({ env: { CORRAL_OPENCODE_SERVICE_FILE: file } }), null);
   await writeFile(file, JSON.stringify({ id: 'x', version: '2.3.2', url: 'http://127.0.0.1:5', pid: 9, password: 'pw' }));
-  const s = await discoverService({ env: { NEBULA_OPENCODE_SERVICE_FILE: file } });
+  const s = await discoverService({ env: { CORRAL_OPENCODE_SERVICE_FILE: file } });
   assert.equal(s?.url, 'http://127.0.0.1:5');
   assert.equal(s?.password, 'pw');
   assert.equal(s?.version, '2.3.2');
   await writeFile(file, '{"url": "http://half');
-  assert.equal(await discoverService({ env: { NEBULA_OPENCODE_SERVICE_FILE: file } }), null);
+  assert.equal(await discoverService({ env: { CORRAL_OPENCODE_SERVICE_FILE: file } }), null);
   const viaHome = await discoverService({ env: {}, platform: 'linux', homedir: '/h', readFile: async (p) => {
     if (p === '/h/.local/state/opencode/service.json') return '{"url":"http://a:1","password":"z"}';
     throw new Error('ENOENT');

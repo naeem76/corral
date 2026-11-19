@@ -459,7 +459,7 @@ test('the snooze menu shows the default choices soonest first with their times; 
     await h.type('s');
     assert.equal(modal(h)?.kind, 'menu');
     const box = modalLines(h);
-    if (process.env.NEBULA_PRINT_MENU) console.log(box.join('\n'));
+    if (process.env.CORRAL_PRINT_MENU) console.log(box.join('\n'));
     const rows = box.map((l) => l.replace(/^│\s*|\s*│$/g, '').replace(/\s+/g, ' '));
     const start = rows.findIndex((r) => r.startsWith('1 '));
     assert.deepEqual(rows.slice(start, start + 6), [
@@ -525,7 +525,7 @@ test('custom time: c opens a prompt; a bad text keeps it open with the error; a 
     assert.equal(m?.kind, 'prompt', 'the prompt stays open');
     assert.match(m?.kind === 'prompt' ? (m.error ?? '') : '', /Use HH:MM, YYYY-MM-DD, YYYY-MM-DD HH:MM, or 30m, 2h, 3d, 1w/);
     assert.match(h.text(), /Not a valid future time/);
-    if (process.env.NEBULA_PRINT_MENU) console.log(h.screen().filter((l) => /[╭│╰]/.test(l)).join('\n'));
+    if (process.env.CORRAL_PRINT_MENU) console.log(h.screen().filter((l) => /[╭│╰]/.test(l)).join('\n'));
     assert.equal(h.store.sessionMeta('ses_a1'), undefined);
     // A past time is refused too.
     await h.type('\x7f\x7f\x7f\x7f');

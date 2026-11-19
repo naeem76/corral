@@ -122,10 +122,10 @@ export function convertColor(c: Color, depth: ColorDepth): Color {
 /**
  * Guess the color depth from the environment. Windows Terminal (WT_SESSION) and COLORTERM
  * truecolor/24bit support 24-bit color. TERM=linux gets 16 colors, a plain *-256color TERM gets
- * the 256 palette, everything else truecolor. NEBULA_COLOR_DEPTH overrides the guess.
+ * the 256 palette, everything else truecolor. CORRAL_COLOR_DEPTH overrides the guess.
  */
 export function detectColorDepth(env: Record<string, string | undefined>): ColorDepth {
-  const forced = env['NEBULA_COLOR_DEPTH'];
+  const forced = env['CORRAL_COLOR_DEPTH'];
   if (forced === 'truecolor' || forced === '256' || forced === '16') return forced;
   const ct = (env['COLORTERM'] ?? '').toLowerCase();
   if (ct === 'truecolor' || ct === '24bit' || env['WT_SESSION']) return 'truecolor';

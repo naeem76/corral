@@ -25,16 +25,16 @@ test('trimTrailingSep keeps the root', () => {
 });
 
 test('stateDir follows the override, Windows and XDG rules', () => {
-  assert.equal(stateDir({ NEBULA_STATE_DIR: '/tmp/s' }, 'linux', '/home/a'), '/tmp/s');
-  assert.equal(stateDir({ XDG_STATE_HOME: '/x' }, 'linux', '/home/a'), '/x/nebula-enterprise');
-  assert.equal(stateDir({ XDG_STATE_HOME: 'rel' }, 'linux', '/home/a'), '/home/a/.local/state/nebula-enterprise');
-  assert.equal(stateDir({}, 'linux', '/home/a'), '/home/a/.local/state/nebula-enterprise');
-  assert.equal(stateDir({ LocalAppData: 'C:\\Users\\A\\AppData\\Local' }, 'win32', 'C:\\Users\\A'), 'C:\\Users\\A\\AppData\\Local\\nebula-enterprise');
-  assert.equal(stateDir({}, 'win32', 'C:\\Users\\A'), 'C:\\Users\\A\\AppData\\Local\\nebula-enterprise');
+  assert.equal(stateDir({ CORRAL_STATE_DIR: '/tmp/s' }, 'linux', '/home/a'), '/tmp/s');
+  assert.equal(stateDir({ XDG_STATE_HOME: '/x' }, 'linux', '/home/a'), '/x/corral');
+  assert.equal(stateDir({ XDG_STATE_HOME: 'rel' }, 'linux', '/home/a'), '/home/a/.local/state/corral');
+  assert.equal(stateDir({}, 'linux', '/home/a'), '/home/a/.local/state/corral');
+  assert.equal(stateDir({ LocalAppData: 'C:\\Users\\A\\AppData\\Local' }, 'win32', 'C:\\Users\\A'), 'C:\\Users\\A\\AppData\\Local\\corral');
+  assert.equal(stateDir({}, 'win32', 'C:\\Users\\A'), 'C:\\Users\\A\\AppData\\Local\\corral');
 });
 
 test('service file candidates: override, then ordered list', () => {
-  assert.deepEqual(serviceFileCandidates({ NEBULA_OPENCODE_SERVICE_FILE: '/s/service.json' }, 'linux', '/h'), ['/s/service.json']);
+  assert.deepEqual(serviceFileCandidates({ CORRAL_OPENCODE_SERVICE_FILE: '/s/service.json' }, 'linux', '/h'), ['/s/service.json']);
   assert.deepEqual(serviceFileCandidates({}, 'linux', '/h'), ['/h/.local/state/opencode/service.json']);
   assert.deepEqual(serviceFileCandidates({ LOCALAPPDATA: 'C:\\U\\L', APPDATA: 'C:\\U\\R' }, 'win32', 'C:\\U'), [
     'C:\\U\\.local\\state\\opencode\\service.json',

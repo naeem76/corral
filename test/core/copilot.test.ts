@@ -521,7 +521,7 @@ test('source: Windows paths match without regard to case and separators', async 
   const home = copilotHome({ USERPROFILE: 'C:\\Users\\Ann' }, 'win32', 'C:\\Users\\Ann');
   assert.equal(home, 'C:\\Users\\Ann\\.copilot');
   assert.equal(copilotHome({ copilot_home: 'D:\\cp' }, 'win32', 'C:\\Users\\Ann'), 'D:\\cp', 'env names ignore case on Windows');
-  assert.equal(copilotHome({ COPILOT_HOME: 'D:\\cp', NEBULA_COPILOT_HOME: 'E:\\mine' }, 'win32', 'C:\\Users\\Ann'), 'E:\\mine');
+  assert.equal(copilotHome({ COPILOT_HOME: 'D:\\cp', CORRAL_COPILOT_HOME: 'E:\\mine' }, 'win32', 'C:\\Users\\Ann'), 'E:\\mine');
   const fs = new MemFs(w);
   const folder = w.join(home, 'session-state', ID1);
   fs.put(w.join(folder, 'workspace.yaml'), `id: ${ID1}\r\ncwd: C:\\Work\\Proj\r\nname: win\r\n`);
