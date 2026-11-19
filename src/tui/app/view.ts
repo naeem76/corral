@@ -1,5 +1,7 @@
 // Drawing of the projects view: three columns, the pane (or the information panel), the
 // footer and the modals. Reads the App state; changes nothing but list scroll positions.
+// The pane, the information panel, the footer and the modals are shared with the inbox view
+// (view-inbox.ts).
 
 import path from 'node:path';
 import type { SessionRow, SessionStatus } from '../../types.ts';
@@ -9,23 +11,26 @@ import { stringWidth } from '../../width.ts';
 import { inset } from '../widgets/layout.ts';
 import { renderList, type ListItem } from '../widgets/list.ts';
 import { drawModal, renderConfirm } from '../widgets/modal.ts';
+import { renderMenu } from '../widgets/menu.ts';
 import { renderTextInput } from '../widgets/textinput.ts';
 import { drawHighlighted } from '../widgets/fuzzy.ts';
 import { footerHints, helpLines } from './bindings.ts';
 import { entryPath } from './browser.ts';
 import { clean, relativeTime, tildify } from './format.ts';
+import { formatSnooze, formatTime } from '../../core/inbox.ts';
+import { SECTION_TITLES } from './inbox-view.ts';
 import type { App, GitRow } from './app.ts';
 import type { AppLayout } from './layout.ts';
 
 const th = defaultTheme;
-const STATUS_TEXT: Record<SessionStatus, string> = {
+export const STATUS_TEXT: Record<SessionStatus, string> = {
   'needs-input': 'needs input',
   working: 'working',
   unseen: 'finished, not seen yet',
   idle: 'idle',
 };
 
-function onBg(st: Style, bg: Style | null): Style {
+export function onBg(st: Style, bg: Style | null): Style {
   return bg ? withStyle(st, { bg: bg.bg }) : st;
 }
 
@@ -41,14 +46,14 @@ export function renderApp(f: Frame, app: App, lay: AppLayout): void {
   drawModalLayer(f, app, lay.screen);
 }
 
-function columnBox(f: Frame, r: Rect, title: string, focused: boolean): void {
+export function columnBox(f: Frame, r: Rect, title: string, focused: boolean): void {
   f.box(r.x, r.y, r.w, r.h, focused ? th.borderFocusedStyle : th.borderStyle, title, {
     border: th.border,
     titleStyle: focused ? th.titleFocusedStyle : th.titleStyle,
   });
 }
 
-function dotAt(f: Frame, x: number, y: number, status: SessionStatus | null, bg: Style | null): void {
+export function dotAt(f: Frame, x: number, y: number, status: SessionStatus | null, bg: Style | null): void {
   if (!status) return;
   const d = statusDot(status);
   f.put(x, y, d.glyph, onBg(d.style, bg));
@@ -175,7 +180,8 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
       dotAt(fr, r.x + 1, r.y, s.status, bg);
       const live = app.panes.has(s.id);
       const time = relativeTime(s.updated, now);
-      const right = (live ? '▸ ' : '') + time;
+      const tag = markTag(app, s, now);
+      const right = (live ? '▸ ' : '') + (tag ? tag + ' ' : '') + time;
       const rw = stringWidth(right);
       const t = clean(s.title) || 'New session';
       fr.text(r.x + 3, r.y, truncate(t, Math.max(1, r.w - 4 - rw)), onBg(s.archived || !s.title ? th.dim : th.text, bg));
@@ -184,9 +190,17 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
   });
 }
 
+/** The inbox mark of a row in the Sessions column: an active snooze or an effective settle. */
+function markTag(app: App, s: SessionRow, now: number): string {
+  const m = app.deps.store.sessionMeta(s.id);
+  if (!m || (m.snoozedUntil === undefined && m.settledAt === undefined)) return '';
+  if (m.snoozedUntil !== undefined && m.snoozedUntil > now && s.status !== 'needs-input') return th.glyphs.snoozed;
+  return app.inbox.entryFor(s)?.section === 'settled' ? th.glyphs.settled : '';
+}
+
 // ---- Pane ------------------------------------------------------------------
 
-function drawPane(f: Frame, app: App, lay: AppLayout): void {
+export function drawPane(f: Frame, app: App, lay: AppLayout): void {
   const outer = lay.pane as Rect;
   const inner = lay.paneInner as Rect;
   const s = app.selectedSession();
@@ -231,7 +245,8 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
   }
   if (!s) {
     const p = app.selectedProject();
-    line(p ? 'Select a session, or press n in the Sessions column for a new one.' : 'Add a project with n (or o from any column).', th.dim);
+    if (app.view === 'inbox') line('Select a session in the list. v switches to the projects view.', th.dim);
+    else line(p ? 'Select a session, or press n in the Sessions column for a new one.' : 'Add a project with n (or o from any column).', th.dim);
     f.popClip();
     return;
   }
@@ -247,6 +262,11 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
   f.text(r.x + 10, y++, `${relativeTime(s.updated, now)} ago`.replace('now ago', 'just now'), th.text, r.w - 10);
   f.text(r.x, y, 'Session   ', th.dim);
   f.text(r.x + 10, y++, s.id, th.dim, r.w - 10);
+  const inbox = inboxText(app, s, now);
+  if (inbox) {
+    f.text(r.x, y, 'Inbox     ', th.dim);
+    f.text(r.x + 10, y++, inbox, th.text, r.w - 10);
+  }
   y++;
   const note = app.notes.get(s.id) ?? app.panes.exitReason(s.id);
   if (note) {
@@ -258,6 +278,19 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
   f.popClip();
 }
 
+/** The inbox section of a session with its snooze or settle time, for the information panel. */
+function inboxText(app: App, s: SessionRow, now: number): string {
+  const e = app.inbox.entryFor(s);
+  if (!e) return '';
+  const m = e.marks;
+  let t = SECTION_TITLES[e.section];
+  if (e.section === 'snoozed' && m.snoozedUntil !== undefined) t += ` ${formatSnooze(m.snoozedUntil, now)}`;
+  else if (e.section === 'settled' && m.settledAt !== undefined) t += ` since ${formatTime(m.settledAt, now)}`;
+  else if (m.settledAt !== undefined) t += ` (settled ${formatTime(m.settledAt, now)}; active since)`;
+  if (e.woke && m.snoozedUntil !== undefined) t += ` · back: the snooze ended ${formatTime(m.snoozedUntil, now)}`;
+  return t;
+}
+
 // ---- Footer ----------------------------------------------------------------
 
 function serviceBadge(app: App): { text: string; style: Style } {
@@ -266,7 +299,7 @@ function serviceBadge(app: App): { text: string; style: Style } {
   return { text: '○ connecting', style: style(3) };
 }
 
-function drawFooter(f: Frame, app: App, r: Rect): void {
+export function drawFooter(f: Frame, app: App, r: Rect): void {
   const badge = serviceBadge(app);
   const bw = stringWidth(badge.text);
   const right = r.x + r.w - bw - 1;
@@ -290,12 +323,15 @@ function drawFooter(f: Frame, app: App, r: Rect): void {
 
 // ---- Modals ----------------------------------------------------------------
 
-function drawModalLayer(f: Frame, app: App, screen: Rect): void {
+export function drawModalLayer(f: Frame, app: App, screen: Rect): void {
   const m = app.modal;
   if (!m) return;
   switch (m.kind) {
     case 'confirm':
       m.state = renderConfirm(f, screen, m.state, th);
+      return;
+    case 'menu':
+      m.state = renderMenu(f, screen, m.state, th);
       return;
     case 'prompt': {
       const width = Math.min(70, Math.max(30, screen.w - 4));

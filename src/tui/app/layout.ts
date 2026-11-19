@@ -1,5 +1,6 @@
-// Screen layout of the projects view: three list columns at the left, the pane at the right,
-// one footer row. Pure function of the window size and a few flags.
+// Screen layouts. The projects view: three list columns at the left, the pane at the right,
+// one footer row. The inbox view: one list at the left, the pane at the right, the footer.
+// Pure functions of the window size and a few flags.
 
 import type { Rect } from '../frame.ts';
 import { inset } from '../widgets/layout.ts';
@@ -12,8 +13,10 @@ export const PANE_MIN = 40;
 export interface AppLayout {
   screen: Rect;
   footer: Rect;
-  /** Outer rectangles of Projects, Git, Sessions; null when the columns are hidden. */
+  /** Outer rectangles of Projects, Git, Sessions; null when hidden or in the inbox view. */
   columns: [Rect, Rect, Rect] | null;
+  /** Outer rectangle of the inbox list; null when hidden or in the projects view. */
+  list: Rect | null;
   /** Outer rectangle of the pane; null when hidden. */
   pane: Rect | null;
   /** Where the emulator grid goes. */
@@ -77,7 +80,7 @@ export function computeLayout(input: LayoutInput): AppLayout {
   const mainH = rows - 1;
   const full = (): AppLayout => {
     const pane: Rect = { x: 0, y: 0, w: cols, h: mainH };
-    return { screen, footer, columns: null, pane, paneInner: pane, paneBare: true };
+    return { screen, footer, columns: null, list: null, pane, paneInner: pane, paneBare: true };
   };
   if (input.paneFocused && input.zoom) return full();
 
@@ -86,7 +89,7 @@ export function computeLayout(input: LayoutInput): AppLayout {
   if (cols - sum >= PANE_MIN) {
     const columns = columnsAt(0, 0, mainH, widths);
     const pane: Rect = { x: sum, y: 0, w: cols - sum, h: mainH };
-    return { screen, footer, columns, pane, paneInner: inset(pane, 1), paneBare: false };
+    return { screen, footer, columns, list: null, pane, paneInner: inset(pane, 1), paneBare: false };
   }
   const room = cols - PANE_MIN;
   const minSum = MIN_WIDTHS[0] + MIN_WIDTHS[1] + MIN_WIDTHS[2];
@@ -95,7 +98,7 @@ export function computeLayout(input: LayoutInput): AppLayout {
     const used = w.reduce((a, b) => a + b, 0);
     const columns = columnsAt(0, 0, mainH, w);
     const pane: Rect = { x: used, y: 0, w: cols - used, h: mainH };
-    return { screen, footer, columns, pane, paneInner: inset(pane, 1), paneBare: false };
+    return { screen, footer, columns, list: null, pane, paneInner: inset(pane, 1), paneBare: false };
   }
   // Too narrow for both: focus decides what is shown.
   if (input.paneFocused) return full();
@@ -103,5 +106,50 @@ export function computeLayout(input: LayoutInput): AppLayout {
   // Give the rounding rest to the last column so the columns fill the window.
   const used = w.reduce((a, b) => a + b, 0);
   w[2] = (w[2] as number) + Math.max(0, cols - used);
-  return { screen, footer, columns: columnsAt(0, 0, mainH, w), pane: null, paneInner: null, paneBare: false };
+  return { screen, footer, columns: columnsAt(0, 0, mainH, w), list: null, pane: null, paneInner: null, paneBare: false };
+}
+
+// ---- inbox view --------------------------------------------------------------
+
+export const DEFAULT_INBOX_WIDTH = 56;
+export const INBOX_MIN_WIDTH = 30;
+const INBOX_MAX_WIDTH = 160;
+
+/** The stored list width, or the default when it is missing or not a number. */
+export function sanitizeInboxWidth(w: unknown): number {
+  if (typeof w !== 'number' || !Number.isFinite(w)) return DEFAULT_INBOX_WIDTH;
+  return Math.max(INBOX_MIN_WIDTH, Math.min(INBOX_MAX_WIDTH, Math.floor(w)));
+}
+
+export interface InboxLayoutInput {
+  cols: number;
+  rows: number;
+  width?: unknown;
+  paneFocused: boolean;
+  zoom: boolean;
+}
+
+/** The same rules as the projects view, with one list in place of the three columns. */
+export function computeInboxLayout(input: InboxLayoutInput): AppLayout {
+  const cols = Math.max(1, input.cols);
+  const rows = Math.max(2, input.rows);
+  const screen: Rect = { x: 0, y: 0, w: cols, h: rows };
+  const footer: Rect = { x: 0, y: rows - 1, w: cols, h: 1 };
+  const mainH = rows - 1;
+  const full = (): AppLayout => {
+    const pane: Rect = { x: 0, y: 0, w: cols, h: mainH };
+    return { screen, footer, columns: null, list: null, pane, paneInner: pane, paneBare: true };
+  };
+  if (input.paneFocused && input.zoom) return full();
+  const want = sanitizeInboxWidth(input.width);
+  // The list shrinks (down to its minimum) before the pane goes below PANE_MIN.
+  const w = Math.min(want, cols - PANE_MIN);
+  if (w >= INBOX_MIN_WIDTH) {
+    const list: Rect = { x: 0, y: 0, w, h: mainH };
+    const pane: Rect = { x: w, y: 0, w: cols - w, h: mainH };
+    return { screen, footer, columns: null, list, pane, paneInner: inset(pane, 1), paneBare: false };
+  }
+  // Too narrow for both: focus decides what is shown.
+  if (input.paneFocused) return full();
+  return { screen, footer, columns: null, list: { x: 0, y: 0, w: cols, h: mainH }, pane: null, paneInner: null, paneBare: false };
 }

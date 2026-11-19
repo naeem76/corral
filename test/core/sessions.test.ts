@@ -201,3 +201,35 @@ test('win32: directories match without regard to case and separators', async () 
   void h;
   tracker.dispose();
 });
+
+test('refresh reads at most `concurrency` directories at a time and keeps buffered events', async () => {
+  const dirs = Array.from({ length: 20 }, (_, i) => `/w/d${i}`);
+  const svc: Svc = { sessions: dirs.map((d, i) => sess(`ses_${i}`, d)), active: [], perms: [], forms: [], calls: [] };
+  const base = fakeClient(svc);
+  let inFlight = 0;
+  let peak = 0;
+  const client: OpenCodeApi = {
+    connection: base.connection,
+    async request<T>(method: string, path: string, opts?: RequestOptions): Promise<T> {
+      const perDir = method === 'GET' && path === '/api/session';
+      if (perDir) peak = Math.max(peak, ++inFlight);
+      try {
+        await new Promise((r) => setTimeout(r, 2));
+        return await base.request<T>(method, path, opts);
+      } finally {
+        if (perDir) inFlight--;
+      }
+    },
+  };
+  let h!: EventHandlers;
+  const tracker = new SessionTracker({ client, subscribe: (_t, x) => ((h = x), { close() {} }), throttleMs: 1, concurrency: 3 });
+  const p = tracker.watch(dirs);
+  // An event during the slow refresh survives the install of the snapshot.
+  h.onEvent('permission.asked', { id: 'per_1', sessionID: 'ses_19' }, { id: 'e1', type: 'permission.asked', created: 5, data: {} });
+  await p;
+  assert.ok(peak <= 3, `peak ${peak}`);
+  assert.ok(peak >= 2, 'it still runs in parallel');
+  for (let i = 0; i < 20; i++) assert.deepEqual(tracker.rows(`/w/d${i}`).map((r) => r.id), [`ses_${i}`]);
+  assert.equal(tracker.status('ses_19'), 'needs-input');
+  tracker.dispose();
+});

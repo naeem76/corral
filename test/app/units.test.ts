@@ -4,7 +4,7 @@ import type { InputEvent } from '../../src/types.ts';
 import {
   createBrowser, handleBrowserInput, loadDir, refilter, resolveSubmit, splitTyped, type BrowserFs,
 } from '../../src/tui/app/browser.ts';
-import { computeLayout, sanitizeWidths } from '../../src/tui/app/layout.ts';
+import { computeInboxLayout, computeLayout, sanitizeInboxWidth, sanitizeWidths } from '../../src/tui/app/layout.ts';
 import { isWebUrl, openCommand, openUrl } from '../../src/tui/app/open-url.ts';
 import { buildBindings, DEFAULT_LEAVE_KEY, findAction, footerHints, validLeaveKey } from '../../src/tui/app/bindings.ts';
 import { createLogger, makeRedactor } from '../../src/tui/app/log.ts';
@@ -125,6 +125,42 @@ test('layout: default widths, shrink, hide the pane, zoom', () => {
   assert.deepEqual(sanitizeWidths([20, 'x', 999]), [20, 30, 120]);
   l = computeLayout({ cols: 200, rows: 50, paneFocused: false, zoom: false, widths: [20, 20, 20] });
   assert.equal(l.pane?.x, 60);
+});
+
+test('inbox layout: default width, shrink, hide the pane, zoom', () => {
+  assert.equal(sanitizeInboxWidth(undefined), 56);
+  assert.equal(sanitizeInboxWidth('x'), 56);
+  assert.equal(sanitizeInboxWidth(10), 30);
+  assert.equal(sanitizeInboxWidth(70.7), 70);
+  assert.equal(sanitizeInboxWidth(9999), 160);
+  let l = computeInboxLayout({ cols: 200, rows: 50, paneFocused: false, zoom: false });
+  assert.equal(l.columns, null);
+  assert.deepEqual(l.list, { x: 0, y: 0, w: 56, h: 49 });
+  assert.deepEqual(l.pane, { x: 56, y: 0, w: 144, h: 49 });
+  assert.deepEqual(l.paneInner, { x: 57, y: 1, w: 142, h: 47 });
+  assert.deepEqual(l.footer, { x: 0, y: 49, w: 200, h: 1 });
+  l = computeInboxLayout({ cols: 200, rows: 50, width: 80, paneFocused: false, zoom: false });
+  assert.equal(l.list?.w, 80);
+  // The list shrinks first, so the pane keeps its minimum width.
+  l = computeInboxLayout({ cols: 80, rows: 30, paneFocused: false, zoom: false });
+  assert.deepEqual([l.list?.w, l.pane?.w], [40, 40]);
+  l = computeInboxLayout({ cols: 70, rows: 30, paneFocused: false, zoom: false });
+  assert.deepEqual([l.list?.w, l.pane?.w], [30, 40]);
+  // Too narrow for both: focus decides.
+  l = computeInboxLayout({ cols: 60, rows: 30, paneFocused: false, zoom: false });
+  assert.deepEqual(l.list, { x: 0, y: 0, w: 60, h: 29 });
+  assert.equal(l.pane, null);
+  l = computeInboxLayout({ cols: 60, rows: 30, paneFocused: true, zoom: false });
+  assert.equal(l.list, null);
+  assert.deepEqual(l.paneInner, { x: 0, y: 0, w: 60, h: 29 });
+  assert.equal(l.paneBare, true);
+  l = computeInboxLayout({ cols: 200, rows: 50, paneFocused: true, zoom: true });
+  assert.equal(l.list, null);
+  assert.deepEqual(l.pane, { x: 0, y: 0, w: 200, h: 49 });
+  l = computeInboxLayout({ cols: 200, rows: 50, paneFocused: false, zoom: true });
+  assert.ok(l.list && l.pane, 'zoom applies only while the pane has focus');
+  // The projects layout has no inbox list.
+  assert.equal(computeLayout({ cols: 200, rows: 50, paneFocused: false, zoom: false }).list, null);
 });
 
 test('open-url: only http(s), no shell on any platform', async () => {

@@ -1,16 +1,17 @@
 // The application controller: state, event handling, background loads, shutdown.
 // Every side effect comes in through `AppDeps`, so the whole program runs headless in tests.
 //
-// Design for a second view: pane management lives in PaneManager and the attention order in
-// `attentionList()`; the projects view (three columns) only selects which session the pane
-// shows. An inbox view can reuse both.
+// Two views share this controller: the projects view (three columns) and the inbox view (one
+// list, see inbox-view.ts). Pane management lives in PaneManager; a view only decides which
+// session `selectedSession()` returns, and the pane follows it.
 
 import path from 'node:path';
 import type { Checkout, Emulator, InputEvent, Project, PtyHandle, PtySpawn, PullRequest, SessionRow, SessionStatus } from '../../types.ts';
 import type { Git, CheckoutStatus } from '../../core/git.ts';
 import type { OpenCodeApi } from '../../core/opencode.ts';
 import type { PrProvider } from '../../core/pr.ts';
-import type { UiState } from '../../core/store.ts';
+import type { SessionMeta, UiState } from '../../core/store.ts';
+import type { SessionInfo } from '../../core/sessions.ts';
 import { pathKey, samePath } from '../../core/paths.ts';
 import { createFrame, renderDiff, type Frame, type Rect } from '../frame.ts';
 import { matches } from '../keys.ts';
@@ -22,9 +23,10 @@ import {
   type ListItem, type ListState,
 } from '../widgets/list.ts';
 import { createConfirm, handleConfirm, type ConfirmState } from '../widgets/modal.ts';
+import { handleMenu, type MenuState } from '../widgets/menu.ts';
 import { createTextInput, handleTextInput, type TextInputState } from '../widgets/textinput.ts';
 import { fuzzyFilter } from '../widgets/fuzzy.ts';
-import { buildBindings, findAction, validLeaveKey, type ActionId, type BindingDef, type Context } from './bindings.ts';
+import { buildBindings, findAction, listContexts, validLeaveKey, type ActionId, type BindingDef, type Context } from './bindings.ts';
 import {
   createBrowser, handleBrowserInput, loadDir, loadGitMarks, refilter, resolveSubmit,
   type BrowserFs, type BrowserState,
@@ -32,11 +34,13 @@ import {
 import { errorText } from './format.ts';
 import { handoff, type ChildRunner } from './handoff.ts';
 import type { Launcher } from './launcher.ts';
-import { computeLayout, type AppLayout } from './layout.ts';
+import { InboxView } from './inbox-view.ts';
+import { computeInboxLayout, computeLayout, type AppLayout } from './layout.ts';
 import type { Logger } from './log.ts';
 import { PaneManager } from './pane-manager.ts';
 import { cleanupStalePtys } from './stale.ts';
 import { renderApp } from './view.ts';
+import { renderInbox } from './view-inbox.ts';
 
 // ---------------------------------------------------------------------------
 // Injected parts
@@ -66,6 +70,8 @@ export interface AppStore {
   moveProject(id: string, delta: -1 | 1): boolean;
   setProjectKind(id: string, kind: 'git' | 'dir'): void;
   setUi(patch: Partial<UiState>): void;
+  sessionMeta(id: string): Readonly<SessionMeta> | undefined;
+  setSessionMeta(id: string, patch: Partial<SessionMeta>): void;
   forgetSession(id: string): void;
   flush(): Promise<void>;
 }
@@ -76,6 +82,7 @@ export interface AppTracker {
   watch(directories: readonly string[]): Promise<void>;
   rows(directory: string): SessionRow[];
   status(id: string): SessionStatus;
+  get(id: string): SessionInfo | undefined;
   markSeen(id: string): void;
   create(directory: string, title?: string): Promise<string>;
   rename(id: string, title: string): Promise<void>;
@@ -121,7 +128,8 @@ export interface AppDeps {
 // State
 // ---------------------------------------------------------------------------
 
-export type Focus = 'projects' | 'git' | 'sessions' | 'pane';
+/** 'inbox' is the list of the inbox view; the other list foci belong to the projects view. */
+export type Focus = 'projects' | 'git' | 'sessions' | 'inbox' | 'pane';
 const COLUMNS: Focus[] = ['projects', 'git', 'sessions'];
 /** Longest pause between the two clicks of a double click. */
 const DOUBLE_CLICK_MS = 400;
@@ -135,6 +143,7 @@ export type Modal =
   | { kind: 'browser'; state: BrowserState }
   | { kind: 'prompt'; title: string; label: string; input: TextInputState; submit: (value: string) => void }
   | { kind: 'confirm'; state: ConfirmState; yes: () => void; no?: () => void }
+  | { kind: 'menu'; state: MenuState; choose: (index: number) => void }
   | { kind: 'help'; scroll: number };
 
 interface CheckoutCache {
@@ -161,6 +170,7 @@ export function worstStatus(list: Iterable<SessionStatus>): SessionStatus | null
 export class App {
   readonly deps: AppDeps;
   readonly panes: PaneManager;
+  readonly inbox: InboxView;
   bindings: BindingDef[];
   leaveKey: string;
 
@@ -191,6 +201,8 @@ export class App {
   handingOff = false;
 
   #want: { checkout: string | null; session: string | null };
+  /** Focus of the projects view while the inbox view is shown. */
+  #projectsFocus: Focus = 'projects';
   #watchKey = '';
   #prev: Frame | null = null;
   #frame: Frame | null = null;
@@ -221,6 +233,11 @@ export class App {
     };
     this.#want = { checkout: ui.selectedCheckoutPath ?? null, session: ui.selectedSessionId ?? null };
     this.#startedAt = deps.now();
+    if (ui.view === 'inbox') {
+      this.view = 'inbox';
+      this.focus = 'inbox';
+    }
+    this.inbox = new InboxView(this);
     this.panes = new PaneManager({
       openPty: deps.openPty,
       createEmulator: deps.createEmulator,
@@ -231,7 +248,7 @@ export class App {
       onChange: () => this.invalidate(),
       onExit: (id, reason) => {
         this.notes.set(id, this.deps.redact(reason));
-        if (this.focus === 'pane' && this.selectedSession()?.id === id) this.focus = 'sessions';
+        if (this.focus === 'pane' && this.selectedSession()?.id === id) this.focus = this.listFocus();
         this.updateWatch();
       },
       onError: (m) => this.error(m),
@@ -243,8 +260,7 @@ export class App {
 
   start(): void {
     const { terminal, store, tracker } = this.deps;
-    if (store.ui.view === 'inbox') this.flash('The inbox view is not available yet; showing projects.');
-    else if (store.ui.view !== 'projects') store.setUi({ view: 'projects' });
+    if (store.ui.view !== 'projects' && store.ui.view !== 'inbox') store.setUi({ view: 'projects' });
     this.#unsubs.push(
       terminal.onInput((events) => {
         for (const ev of events) {
@@ -265,6 +281,7 @@ export class App {
         this.invalidate();
       }),
       store.onChange(() => {
+        this.inbox.changed();
         this.updateWatch();
         this.invalidate();
       }),
@@ -273,6 +290,7 @@ export class App {
     // Restore the project selection, then load what it needs.
     this.lists.projects = reconcileList(this.lists.projects, this.projectItems(), this.listRows('projects'));
     this.onProjectChanged();
+    if (this.view === 'inbox') void this.loadAllCheckouts();
     this.updateWatch();
     void this.connectService();
     void this.deps.prs.available().then(
@@ -291,11 +309,13 @@ export class App {
     }, every);
     this.#slowTimer.unref?.();
     // Redraw when something changes that sends no event: the connection badge, an expired
-    // footer message, the minute of the relative times.
+    // footer message, the minute of the relative times, the end of a snooze (the inbox list
+    // computes the next end; when it passes, the list is built again and the value changes).
     this.#tick = setInterval(() => {
       const m = this.message;
       const expired = m ? this.deps.now() - m.at > (m.error ? 12_000 : 5_000) : false;
-      const state = `${this.deps.tracker.connected}|${this.service}|${expired}|${Math.floor(this.deps.now() / 60_000)}`;
+      const wake = this.inbox.nextWake();
+      const state = `${this.deps.tracker.connected}|${this.service}|${expired}|${Math.floor(this.deps.now() / 60_000)}|${wake}`;
       if (expired) this.message = null;
       if (state !== this.#tickState || expired) {
         this.#tickState = state;
@@ -386,7 +406,7 @@ export class App {
     if (this.#loadTimer) clearTimeout(this.#loadTimer);
     for (const u of this.#unsubs) u();
     this.#unsubs = [];
-    const sel = this.selectedSession();
+    const sel = this.projectSession();
     this.deps.store.setUi({
       selectedProjectId: this.selectedProject()?.id ?? null,
       selectedCheckoutPath: this.checkoutPath,
@@ -424,6 +444,9 @@ export class App {
 
   layout(): AppLayout {
     const { cols, rows } = this.deps.terminal.size();
+    if (this.view === 'inbox') {
+      return computeInboxLayout({ cols, rows, width: this.deps.store.ui.inboxWidth, paneFocused: this.focus === 'pane', zoom: this.zoom });
+    }
     return computeLayout({
       cols,
       rows,
@@ -511,9 +534,21 @@ export class App {
     return this.sessionRows().map((r) => ({ key: r.id, data: r }));
   }
 
+  /** The session of the current view: the pane, zoom and the session actions follow it. */
   selectedSession(): SessionRow | undefined {
+    if (this.view === 'inbox') return this.inbox.selected()?.row;
+    return this.projectSession();
+  }
+
+  /** The session selected in the Sessions column of the projects view. */
+  projectSession(): SessionRow | undefined {
     const id = this.lists.sessions.selectedKey;
     return id ? this.sessionRows().find((r) => r.id === id) : undefined;
+  }
+
+  /** The list focus of the current view (where the leave key and a closed pane return). */
+  listFocus(): Focus {
+    return this.view === 'inbox' ? 'inbox' : 'sessions';
   }
 
   /** Directories of a project the tracker can know: the root and the loaded checkouts. */
@@ -550,11 +585,15 @@ export class App {
     return out;
   }
 
-  /** Watch the roots of all projects, the checkouts of the selected one, and live pane folders. */
+  /**
+   * Watch the roots of all projects, the checkouts of the selected one, and live pane folders.
+   * The inbox view watches the loaded checkouts of every project.
+   */
   updateWatch(): void {
     const dirs = new Map<string, string>();
     const add = (d: string) => dirs.set(pathKey(d, this.deps.platform), d);
     for (const p of this.deps.store.projects) add(p.path);
+    if (this.view === 'inbox') for (const p of this.deps.store.projects) for (const d of this.projectDirs(p)) add(d);
     const sel = this.selectedProject();
     if (sel) for (const d of this.projectDirs(sel)) add(d);
     for (const pane of this.panes.list()) add(pane.directory);
@@ -565,6 +604,19 @@ export class App {
   }
 
   // ---- background loads --------------------------------------------------
+
+  /** Load the checkouts of every project, a few at a time (the inbox view needs all folders). */
+  async loadAllCheckouts(force = false): Promise<void> {
+    const list = [...this.deps.store.projects];
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < list.length && !this.quitting) {
+        const p = list[next++] as Project;
+        await this.loadCheckouts(p, force).catch((err) => this.log(`checkouts ${p.path}: ${errorText(err)}`));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, list.length) }, worker));
+  }
 
   async loadCheckouts(p: Project, force = false): Promise<void> {
     const cur = this.checkouts.get(p.id);
@@ -596,6 +648,7 @@ export class App {
     entry.loading = false;
     entry.at = this.deps.now();
     this.checkouts.set(p.id, entry);
+    this.inbox.changed();
     this.afterCheckoutsLoaded(p);
     this.updateWatch();
     this.invalidate();
@@ -647,12 +700,15 @@ export class App {
   }
 
   onTrackerChange(): void {
+    this.inbox.changed();
+    this.inbox.applyMarkRules();
     // Apply a wanted session selection once its row exists.
     const want = this.#want.session;
     if (want && this.sessionRows().some((r) => r.id === want)) {
       this.lists.sessions = selectKey(this.lists.sessions, this.sessionItems(), want, this.listRows('sessions'));
       this.#want.session = null;
     }
+    if (this.view === 'inbox') this.inbox.reconcile();
     // A session shown in the focused pane that turns unseen is seen at once.
     const s = this.selectedSession();
     if (this.focus === 'pane' && s && s.status === 'unseen') this.deps.tracker.markSeen(s.id);
@@ -713,10 +769,11 @@ export class App {
   }
 
   onSessionChanged(): void {
-    const s = this.selectedSession();
-    if (s) this.panes.touch(s.id);
+    // Background loads call this in the inbox view too: only the projects view state changes then.
+    const s = this.projectSession();
+    if (s && this.view === 'projects') this.panes.touch(s.id);
     if (s || !this.#want.session) this.deps.store.setUi({ selectedSessionId: s?.id ?? this.#want.session ?? null });
-    if (this.focus === 'pane' && (!s || !this.panes.has(s.id))) this.focus = 'sessions';
+    if (this.view === 'projects' && this.focus === 'pane' && (!s || !this.panes.has(s.id))) this.focus = 'sessions';
   }
 
   // ---- input -------------------------------------------------------------
@@ -731,6 +788,11 @@ export class App {
       this.handlePaneEvent(ev);
       return;
     }
+    if (this.view === 'inbox') {
+      this.focus = 'inbox';
+      this.inbox.handleEvent(ev);
+      return;
+    }
     if (ev.type === 'mouse') {
       this.handleMouse(ev);
       return;
@@ -742,7 +804,7 @@ export class App {
     }
     if (ev.type === 'paste') return;
     const col = this.focus as 'projects' | 'git' | 'sessions';
-    const action = findAction(this.bindings, [col, 'columns'], ev);
+    const action = findAction(this.bindings, listContexts(col), ev);
     if (action) {
       this.run(action);
       return;
@@ -815,6 +877,10 @@ export class App {
   }
 
   handleMouse(ev: Extract<InputEvent, { type: 'mouse' }>): void {
+    if (this.view === 'inbox') {
+      this.inbox.handleMouse(ev);
+      return;
+    }
     const lay = this.layout();
     if (lay.columns) {
       for (let i = 0; i < 3; i++) {
@@ -850,7 +916,7 @@ export class App {
     const s = this.selectedSession();
     const pane = s ? this.panes.get(s.id) : undefined;
     if (!s || !pane) {
-      this.focus = 'sessions';
+      this.focus = this.listFocus();
       return;
     }
     switch (ev.type) {
@@ -877,7 +943,8 @@ export class App {
           if (seq) this.panes.write(s.id, seq);
           return;
         }
-        if (ev.action === 'down' && lay.columns?.some((r) => rectContains(r, ev.x, ev.y))) {
+        const onList = lay.columns?.some((r) => rectContains(r, ev.x, ev.y)) || (lay.list !== null && rectContains(lay.list, ev.x, ev.y));
+        if (ev.action === 'down' && onList) {
           this.leavePane();
           this.handleMouse(ev);
         }
@@ -894,6 +961,7 @@ export class App {
     this.focus = 'pane';
     this.panes.touch(s.id);
     this.deps.tracker.markSeen(s.id);
+    this.inbox.opened(s.id);
     const seq = encodeFocusForPty(true, pane.emulator.modes);
     if (seq) this.panes.write(s.id, seq);
     this.#prev = null;
@@ -906,7 +974,7 @@ export class App {
       const seq = encodeFocusForPty(false, pane.emulator.modes);
       if (seq) this.panes.write(s.id, seq);
     }
-    this.focus = 'sessions';
+    this.focus = this.listFocus();
     this.#prev = null;
   }
 
@@ -925,6 +993,16 @@ export class App {
           if (ev.action === 'wheel-down') m.scroll += 3;
           else if (ev.action === 'wheel-up') m.scroll = Math.max(0, m.scroll - 3);
           else if (ev.action === 'down') this.modal = null;
+        }
+        return;
+      }
+      case 'menu': {
+        const r = handleMenu(m.state, ev);
+        m.state = r.state;
+        if (r.result === 'cancel') this.modal = null;
+        else if (r.result !== null) {
+          this.modal = null;
+          m.choose(r.result);
         }
         return;
       }
@@ -1004,6 +1082,7 @@ export class App {
   // ---- actions -----------------------------------------------------------
 
   run(action: ActionId): void {
+    if (this.view === 'inbox' && this.inbox.run(action)) return;
     const col = this.focus as 'projects' | 'git' | 'sessions';
     switch (action) {
       case 'focus-next':
@@ -1054,8 +1133,18 @@ export class App {
         this.refreshAll();
         return;
       case 'switch-view':
-        this.flash('The inbox view is not available yet.');
+        this.switchView(this.view === 'inbox' ? 'projects' : 'inbox');
         return;
+      case 'session-snooze':
+      case 'session-settle':
+      case 'session-unmark': {
+        const s = this.selectedSession();
+        if (!s) return;
+        if (action === 'session-snooze') this.inbox.snoozeMenu(s);
+        else if (action === 'session-settle') this.inbox.toggleSettle(s);
+        else this.inbox.unmark(s);
+        return;
+      }
       case 'help':
         this.modal = { kind: 'help', scroll: 0 };
         return;
@@ -1170,7 +1259,39 @@ export class App {
     void this.openSession(s, true);
   }
 
+  /**
+   * Show the other view. The selection goes along: the session of the Sessions column is
+   * selected in the inbox (when it is there), the inbox session in the columns. Panes stay open.
+   */
+  switchView(to: 'projects' | 'inbox', entry?: { row: SessionRow; project: Project; checkout?: Checkout }): void {
+    if (to === this.view) return;
+    if (this.focus === 'pane') this.leavePane();
+    if (to === 'inbox') {
+      const s = this.projectSession();
+      this.#projectsFocus = this.focus;
+      this.view = 'inbox';
+      this.focus = 'inbox';
+      this.deps.store.setUi({ view: 'inbox' });
+      this.inbox.changed();
+      if (s && this.inbox.items().some((it) => it.key === s.id)) this.inbox.select(s.id);
+      void this.loadAllCheckouts();
+    } else {
+      const e = entry ?? this.inbox.selected();
+      this.view = 'projects';
+      this.focus = this.#projectsFocus === 'inbox' || this.#projectsFocus === 'pane' ? 'sessions' : this.#projectsFocus;
+      this.deps.store.setUi({ view: 'projects' });
+      if (e) {
+        this.selectSession(e.project, e.checkout?.path ?? e.row.directory, e.row.id);
+        this.focus = 'sessions';
+      }
+    }
+    this.updateWatch();
+    this.#prev = null;
+    this.invalidate();
+  }
+
   refreshAll(): void {
+    if (this.view === 'inbox') void this.loadAllCheckouts(true);
     const p = this.selectedProject();
     if (p) {
       void this.loadCheckouts(p, true);
@@ -1329,8 +1450,7 @@ export class App {
     }
   }
 
-  async newSession(): Promise<void> {
-    const dir = this.checkoutPath;
+  async newSession(dir: string | null = this.checkoutPath): Promise<void> {
     if (!dir) {
       this.flash('Select a project first.');
       return;
@@ -1339,6 +1459,15 @@ export class App {
     this.flash('Creating a session…');
     try {
       const id = await this.deps.tracker.create(dir);
+      if (this.view === 'inbox') {
+        this.focus = 'inbox';
+        this.inbox.changed();
+        this.inbox.select(id);
+        const s = this.inbox.selected();
+        if (s?.row.id === id) await this.openSession(s.row, true);
+        else this.flash('Session created.');
+        return;
+      }
       this.#want.session = id;
       this.focus = 'sessions';
       this.onTrackerChange();
@@ -1360,7 +1489,10 @@ export class App {
     let lay = this.layout();
     if (!lay.paneInner) {
       const { cols, rows } = this.deps.terminal.size();
-      lay = computeLayout({ cols, rows, widths: this.deps.store.ui.columnWidths, paneFocused: true, zoom: this.zoom });
+      lay =
+        this.view === 'inbox'
+          ? computeInboxLayout({ cols, rows, width: this.deps.store.ui.inboxWidth, paneFocused: true, zoom: this.zoom })
+          : computeLayout({ cols, rows, widths: this.deps.store.ui.columnWidths, paneFocused: true, zoom: this.zoom });
     }
     const inner = lay.paneInner as Rect;
     return { cols: Math.max(10, inner.w), rows: Math.max(4, inner.h) };
@@ -1447,10 +1579,9 @@ export class App {
         this.flash(`Unarchived "${s.title}".`);
       } else if (mode === 'toggle') {
         await this.deps.tracker.archive(s.id);
-        this.flash(`Archived "${s.title}". A shows archived sessions.`);
+        this.flash(this.view === 'inbox' ? `Archived "${s.title}"; it left the inbox.` : `Archived "${s.title}". A shows archived sessions.`);
       }
-      this.lists.sessions = reconcileList(this.lists.sessions, this.sessionItems(), this.listRows('sessions'));
-      this.onSessionChanged();
+      this.sessionListChanged();
     } catch (err) {
       this.error(`Cannot archive: ${errorText(err)}`);
     }
@@ -1474,8 +1605,7 @@ export class App {
             await this.deps.tracker.remove(s.id);
             this.deps.store.forgetSession(s.id);
             this.notes.delete(s.id);
-            this.lists.sessions = reconcileList(this.lists.sessions, this.sessionItems(), this.listRows('sessions'));
-            this.onSessionChanged();
+            this.sessionListChanged();
             this.flash('Session deleted.');
           } catch (err) {
             this.error(`Cannot delete the session: ${errorText(err)}`);
@@ -1483,6 +1613,17 @@ export class App {
         })();
       },
     };
+  }
+
+  /** After an archive or a delete: the selection moves to the next row of the current view. */
+  sessionListChanged(): void {
+    if (this.view === 'inbox') {
+      this.inbox.changed();
+      this.inbox.reconcile();
+      return;
+    }
+    this.lists.sessions = reconcileList(this.lists.sessions, this.sessionItems(), this.listRows('sessions'));
+    this.onSessionChanged();
   }
 
   jumpAttention(dir: 1 | -1): void {
@@ -1543,12 +1684,16 @@ export class App {
     }
     const { cols, rows } = this.deps.terminal.size();
     const f = createFrame(cols, rows);
-    const lay = this.layout();
     // Keep the list states valid for the current items and heights.
-    for (const col of COLUMNS as Array<'projects' | 'git' | 'sessions'>) {
-      this.lists[col] = reconcileList(this.lists[col], this.itemsOf(col), this.listRows(col));
+    if (this.view === 'inbox') this.inbox.reconcile();
+    else {
+      for (const col of COLUMNS as Array<'projects' | 'git' | 'sessions'>) {
+        this.lists[col] = reconcileList(this.lists[col], this.itemsOf(col), this.listRows(col));
+      }
     }
-    renderApp(f, this, lay);
+    const lay = this.layout();
+    if (this.view === 'inbox') renderInbox(f, this, lay);
+    else renderApp(f, this, lay);
     this.#scheduleFit(lay);
     this.#lastDraw = this.deps.now();
     this.#frame = f;

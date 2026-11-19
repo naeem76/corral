@@ -175,9 +175,22 @@ export class FakeService implements OpenCodeApi {
   }
 }
 
+/** Real time plus an offset the test can move forward. Timers still run in real time. */
+export class FakeClock {
+  offset = 0;
+  now = (): number => Date.now() + this.offset;
+  advance(ms: number): void {
+    this.offset += ms;
+  }
+}
+
 /** Event stream for the tracker, driven by the test. */
 export class FakeEvents {
   handlers: EventHandlers | null = null;
+  clock: FakeClock;
+  constructor(clock: FakeClock = new FakeClock()) {
+    this.clock = clock;
+  }
   subscribe = (_types: readonly string[], h: EventHandlers) => {
     this.handlers = h;
     return { close: () => (this.handlers = null) };
@@ -186,7 +199,7 @@ export class FakeEvents {
     this.handlers?.onConnect();
   }
   emit(type: string, data: unknown, directory?: string): void {
-    this.handlers?.onEvent(type, data, { type, data, created: Date.now(), location: directory ? { directory } : undefined });
+    this.handlers?.onEvent(type, data, { type, data, created: this.clock.now(), location: directory ? { directory } : undefined });
   }
 }
 
@@ -238,6 +251,7 @@ export interface Harness {
   dir: string;
   stateDir: string;
   deps: AppDeps;
+  clock: FakeClock;
   screen(): string[];
   text(): string;
   settle(ms?: number): Promise<void>;
@@ -257,6 +271,9 @@ export interface HarnessOptions {
   deps?: Partial<AppDeps>;
   service?: FakeService;
   connect?: boolean;
+  /** Use this folder for `state.json` (a restart test). Default: a new folder. */
+  stateDir?: string;
+  clock?: FakeClock;
 }
 
 export async function tempDir(prefix = 'neb-app-'): Promise<string> {
@@ -279,16 +296,17 @@ export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export async function harness(opts: HarnessOptions = {}): Promise<Harness> {
   const dir = await tempDir();
-  const stateDir = path.join(dir, 'state');
+  const stateDir = opts.stateDir ?? path.join(dir, 'state');
+  const clock = opts.clock ?? new FakeClock();
   const git = opts.git ?? createGit();
-  const store = new Store({ dir: stateDir, debounceMs: 5, detectKind: (p) => git.detectKind(p) });
+  const store = new Store({ dir: stateDir, debounceMs: 5, detectKind: (p) => git.detectKind(p), now: clock.now });
   await store.load();
   if (opts.setupState) await opts.setupState(store, dir);
   const term = new FakeTerminal(opts.cols ?? 160, opts.rows ?? 40);
   const service = opts.service ?? new FakeService();
-  const events = new FakeEvents();
+  const events = new FakeEvents(clock);
   const logs: string[] = [];
-  const tracker = new SessionTracker({ client: service, store, subscribe: events.subscribe, throttleMs: 1 });
+  const tracker = new SessionTracker({ client: service, store, subscribe: events.subscribe, throttleMs: 1, now: clock.now });
   const ptys: FakePty[] = [];
   const deps: AppDeps = {
     terminal: term,
@@ -310,7 +328,7 @@ export async function harness(opts: HarnessOptions = {}): Promise<Harness> {
     runChild: async () => ({ code: 0 }),
     openUrl: async () => {},
     fs: createNodeBrowserFs(),
-    now: Date.now,
+    now: clock.now,
     pid: 4242,
     isAlive: () => false,
     platform: process.platform,
@@ -324,7 +342,7 @@ export async function harness(opts: HarnessOptions = {}): Promise<Harness> {
   app.start();
   if (opts.connect !== false) events.connect();
   const h: Harness = {
-    app, term, service, events, store, tracker, ptys, logs, dir, stateDir, deps,
+    app, term, service, events, store, tracker, ptys, logs, dir, stateDir, deps, clock,
     screen() {
       const f = app.draw();
       const out: string[] = [];

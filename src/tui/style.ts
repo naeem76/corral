@@ -228,6 +228,11 @@ export interface Theme {
   danger: Style;
   /** Status dot color for each session status. */
   status: Record<SessionStatus, Color>;
+  /**
+   * Marks of the inbox shown in the Sessions column: an active snooze and an effective settle.
+   * Each must exist in Cascadia Mono (the Windows Terminal default font).
+   */
+  glyphs: { snoozed: string; settled: string };
 }
 
 const ACCENT = 6; // cyan
@@ -263,6 +268,7 @@ export const defaultTheme: Theme = {
   scrollThumb: style(7),
   danger: style(RED, COLOR_DEFAULT, ATTR.bold),
   status: { 'needs-input': RED, working: YELLOW, unseen: GREEN, idle: GRAY },
+  glyphs: { snoozed: 'zz', settled: '✓' },
 };
 
 /** The status dot glyph and its style. */

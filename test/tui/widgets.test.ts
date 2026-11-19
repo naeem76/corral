@@ -10,6 +10,7 @@ import {
 } from '../../src/tui/widgets/list.ts';
 import type { ListItem, ListState } from '../../src/tui/widgets/list.ts';
 import { createTextInput, handleTextInput, renderTextInput, scrollFor } from '../../src/tui/widgets/textinput.ts';
+import { createMenu, handleMenu, renderMenu } from '../../src/tui/widgets/menu.ts';
 import type { TextInputState } from '../../src/tui/widgets/textinput.ts';
 import { fuzzyFilter, fuzzyMatch } from '../../src/tui/widgets/fuzzy.ts';
 import { confirmReady, createConfirm, handleConfirm, renderConfirm } from '../../src/tui/widgets/modal.ts';
@@ -403,4 +404,24 @@ test('confirm: render and click the buttons', () => {
   assert.equal(handleConfirm(c, click(c.hit.no!.x + 1, c.hit.no!.y)).result, 'no');
   assert.equal(handleConfirm(c, click(0, 0)).result, null);
   for (let y = 0; y < 12; y++) assert.ok(stringWidth(f.rowText(y)) <= 60);
+});
+
+test('menu: item keys, j/k with Enter, Esc, and clicks', () => {
+  const k = (key: string): InputEvent => ({ type: 'key', key, ctrl: false, alt: false, shift: false, raw: key });
+  let m = createMenu('Snooze', [{ key: '1', label: 'One' }, { key: 't', label: 'Two', detail: '09:00' }], 'note');
+  assert.equal(handleMenu(m, k('t')).result, 1);
+  assert.equal(handleMenu(m, k('escape')).result, 'cancel');
+  assert.equal(handleMenu(m, k('x')).result, null);
+  m = handleMenu(m, k('j')).state;
+  assert.equal(m.picked, 1);
+  assert.equal(handleMenu(m, k('enter')).result, 1);
+  const f = createFrame(60, 20);
+  m = renderMenu(f, { x: 0, y: 0, w: 60, h: 20 }, m);
+  assert.ok(m.hit && m.box);
+  const text = [...Array(20).keys()].map((y) => f.rowText(y)).join('\n');
+  assert.match(text, /t\s+Two\s+09:00/);
+  const at = (x: number, y: number): InputEvent => ({ type: 'mouse', x, y, button: 'left', action: 'down', ctrl: false, alt: false, shift: false, raw: '' });
+  assert.equal(handleMenu(m, at(m.hit!.x + 2, m.hit!.y)).result, 0);
+  assert.equal(handleMenu(m, at(m.box!.x + 1, m.box!.y)).result, null, 'a click on the box keeps it open');
+  assert.equal(handleMenu(m, at(0, 0)).result, 'cancel');
 });

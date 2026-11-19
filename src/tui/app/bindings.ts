@@ -8,7 +8,11 @@
 import type { InputEvent } from '../../types.ts';
 import { formatBinding, matches, parseBinding } from '../keys.ts';
 
-export type Context = 'columns' | 'projects' | 'git' | 'sessions' | 'pane' | 'browser';
+/**
+ * Where a binding applies. 'columns': every column of the projects view. 'inbox': the list of
+ * the inbox view. 'global': the lists of both views.
+ */
+export type Context = 'global' | 'columns' | 'projects' | 'git' | 'sessions' | 'inbox' | 'pane' | 'browser';
 
 export type ActionId =
   | 'focus-next' | 'focus-prev' | 'focus-left' | 'focus-right' | 'move' | 'half-down' | 'half-up'
@@ -18,6 +22,7 @@ export type ActionId =
   | 'worktree-new' | 'worktree-delete'
   | 'session-new' | 'session-rename' | 'session-archive' | 'session-unarchive' | 'session-delete'
   | 'session-show-archived' | 'session-handoff'
+  | 'session-snooze' | 'session-settle' | 'session-unmark' | 'inbox-show-settled' | 'inbox-goto' | 'inbox-pane'
   | 'pane-leave'
   | 'browser-complete' | 'browser-pick' | 'browser-in' | 'browser-up' | 'browser-add' | 'browser-cancel';
 
@@ -75,6 +80,8 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('session-delete', 'sessions', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode (confirm)', { footer: true }),
     b('session-show-archived', 'sessions', ['A'], 'archived', 'Show or hide archived sessions', { footer: true }),
     b('session-handoff', 'sessions', ['O'], 'full window', 'Open the session in the full window (suspends this program)'),
+    b('session-snooze', 'sessions', ['s'], 'snooze', 'Snooze the session (an inbox mark, shown as zz)'),
+    b('session-settle', 'sessions', ['e'], 'settle', 'Settle or unsettle the session (an inbox mark, shown as ✓)'),
 
     // Every column.
     b('enter', 'columns', ['enter'], 'open', 'Drill in; on a session: open it in the pane (also a double click; one click selects)', { footer: true }),
@@ -88,11 +95,32 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('add-project', 'columns', ['o'], 'add project', 'Add a project from any column'),
     b('next-attention', 'columns', [']'], 'next', 'Next session that needs attention (needs input, working, unseen, rest)', { footer: true }),
     b('prev-attention', 'columns', ['['], 'previous', 'Previous session in attention order'),
-    b('zoom', 'columns', ['z'], 'zoom', 'Zoom: the pane takes the whole window while it has focus'),
-    b('refresh', 'columns', ['R'], 'refresh', 'Refresh Git status, worktrees, pull requests and sessions'),
-    b('switch-view', 'columns', ['v'], 'view', 'Switch view (inbox: not available yet)'),
-    b('help', 'columns', ['?'], 'help', 'Show this help', { footer: true }),
-    b('quit', 'columns', ['q', 'ctrl+c'], 'quit', 'Quit (asks first; sessions keep running in OpenCode)', { footer: true }),
+
+    // Inbox view: one list of the sessions of all projects, in sections.
+    b('enter', 'inbox', ['enter'], 'open', 'Open the session in the pane and focus it (also a double click; one click selects)', { footer: true }),
+    b('move', 'inbox', ['j', 'k', 'down', 'up'], 'move', 'Move the selection; headers are skipped (also PgUp/PgDn, Home/End, wheel)', { passive: true }),
+    b('half-down', 'inbox', ['ctrl+d'], 'half down', 'Half a list down'),
+    b('half-up', 'inbox', ['ctrl+u'], 'half up', 'Half a list up'),
+    b('inbox-pane', 'inbox', ['l', 'right', 'tab'], 'pane', 'Focus the pane when the session is open there'),
+    b('session-snooze', 'inbox', ['s'], 'snooze', 'Snooze: hide the session until a time, or until it needs input', { footer: true }),
+    b('session-settle', 'inbox', ['e'], 'settle', 'Settle ("done for now") or unsettle; new activity brings it back', { footer: true }),
+    b('session-unmark', 'inbox', ['u'], 'reopen', 'Back to Open: remove the snooze or the settle mark', { footer: true }),
+    b('inbox-show-settled', 'inbox', ['E'], 'settled', 'Show or hide the Settled section'),
+    b('session-new', 'inbox', ['n'], 'new', 'New session in the folder of the selected session'),
+    b('session-rename', 'inbox', ['r'], 'rename', 'Rename the session (inbox)'),
+    b('session-archive', 'inbox', ['a'], 'archive', 'Archive the session; it leaves the inbox'),
+    b('session-delete', 'inbox', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode and its inbox marks (confirm)'),
+    b('session-handoff', 'inbox', ['O'], 'full window', 'Open the session in the full window (inbox)'),
+    b('inbox-goto', 'inbox', ['g'], 'go to', 'Show the session in the projects view'),
+    b('next-attention', 'inbox', [']'], 'next', 'Next session that wants attention (needs input, then unseen or back), wrapping', { footer: true }),
+    b('prev-attention', 'inbox', ['['], 'previous', 'Previous session that wants attention'),
+
+    // Both views.
+    b('zoom', 'global', ['z'], 'zoom', 'Zoom: the pane takes the whole window while it has focus'),
+    b('refresh', 'global', ['R'], 'refresh', 'Refresh Git status, worktrees, pull requests and sessions'),
+    b('switch-view', 'global', ['v'], 'view', 'Switch between the projects view and the inbox view (saved)', { footer: true }),
+    b('help', 'global', ['?'], 'help', 'Show this help', { footer: true }),
+    b('quit', 'global', ['q', 'ctrl+c'], 'quit', 'Quit (asks first; sessions keep running in OpenCode)', { footer: true }),
 
     // The pane: everything else goes to OpenCode.
     b('pane-leave', 'pane', [leaveKey], 'leave pane', 'Leave the pane (every other key goes to OpenCode); a click on a column also leaves', { footer: true }),
@@ -124,10 +152,17 @@ export function keyLabel(def: BindingDef): string {
   return def.keys.map(formatBinding).join(' ');
 }
 
+/** The contexts the dispatcher and the footer search, in order, when the keyboard is in `ctx`. */
+export function listContexts(ctx: Context): Context[] {
+  if (ctx === 'pane' || ctx === 'browser' || ctx === 'global') return [ctx];
+  if (ctx === 'inbox') return ['inbox', 'global'];
+  if (ctx === 'columns') return ['columns', 'global'];
+  return [ctx, 'columns', 'global'];
+}
+
 export function footerHints(table: readonly BindingDef[], ctx: Context): Array<{ key: string; label: string }> {
   const out: Array<{ key: string; label: string }> = [];
-  const order: Context[] = ctx === 'pane' || ctx === 'browser' ? [ctx] : [ctx, 'columns'];
-  for (const c of order) {
+  for (const c of listContexts(ctx)) {
     for (const def of table) {
       if (def.ctx !== c || !def.footer) continue;
       const keys = def.action === 'project-down' ? 'J/K' : formatBinding(def.keys[0] as string);
@@ -138,10 +173,12 @@ export function footerHints(table: readonly BindingDef[], ctx: Context): Array<{
 }
 
 export const CONTEXT_TITLES: Record<Context, string> = {
+  global: 'Both views',
+  inbox: 'Inbox view',
   projects: 'Projects column',
   git: 'Git column',
   sessions: 'Sessions column',
-  columns: 'Every column',
+  columns: 'Every column of the projects view',
   pane: 'Pane (OpenCode)',
   browser: 'Add project prompt',
 };
@@ -149,7 +186,7 @@ export const CONTEXT_TITLES: Record<Context, string> = {
 /** Lines of the help overlay, grouped by context. */
 export function helpLines(table: readonly BindingDef[]): Array<{ heading?: string; key?: string; text?: string }> {
   const out: Array<{ heading?: string; key?: string; text?: string }> = [];
-  const order: Context[] = ['columns', 'projects', 'git', 'sessions', 'pane', 'browser'];
+  const order: Context[] = ['global', 'columns', 'projects', 'git', 'sessions', 'inbox', 'pane', 'browser'];
   for (const ctx of order) {
     const defs = table.filter((d) => d.ctx === ctx);
     if (defs.length === 0) continue;

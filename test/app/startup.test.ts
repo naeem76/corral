@@ -242,16 +242,6 @@ test('the password never appears in a frame or a log line', async () => {
   }
 });
 
-test('switch view is reserved and says it is not available', async () => {
-  const { h } = await oneSession();
-  try {
-    await h.type('v');
-    assert.match(h.text(), /inbox view is not available yet/);
-  } finally {
-    await h.dispose();
-  }
-});
-
 test('a script shim: the version comes from the npm package next to it', async () => {
   const shim = { ok: false as const, reason: 'shim' as const, path: 'C:\\Users\\me\\AppData\\Roaming\\npm\\opencode.cmd' };
   const files: Record<string, string> = {

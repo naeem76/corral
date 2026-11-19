@@ -56,6 +56,8 @@ export interface TrackerOptions {
   throttleMs?: number;
   /** Sessions read per directory (newest first). */
   listLimit?: number;
+  /** Directories read at the same time in a refresh (each one is three requests). Default 8. */
+  concurrency?: number;
   onError?: (err: Error) => void;
 }
 
@@ -95,6 +97,7 @@ export class SessionTracker {
   #now: () => number;
   #throttleMs: number;
   #limit: number;
+  #concurrency: number;
   #onError: (err: Error) => void;
 
   /** Watched directories: key -> directory as given (trailing separator removed). */
@@ -120,6 +123,7 @@ export class SessionTracker {
     this.#now = opts.now ?? Date.now;
     this.#throttleMs = opts.throttleMs ?? 50;
     this.#limit = opts.listLimit ?? 500;
+    this.#concurrency = Math.max(1, opts.concurrency ?? 8);
     this.#onError = opts.onError ?? (() => {});
     const subscribe: EventSubscriber =
       opts.subscribe ?? ((types, h) => subscribeEvents(this.#client, { types, ...h }));
@@ -266,7 +270,7 @@ export class SessionTracker {
     if (dirs.length === 0) return;
     this.#refreshing++;
     try {
-      const [active, ...perDir] = await Promise.all([
+      const [active, perDir] = await Promise.all([
         this.#client.request<{ data: Record<string, unknown> }>('GET', '/api/session/active').then(
           (r) => r,
           (err) => {
@@ -274,7 +278,8 @@ export class SessionTracker {
             return null;
           },
         ),
-        ...dirs.map((d) => this.#readDir(d)),
+        // Many projects with worktrees would otherwise send hundreds of requests at once.
+        mapLimit(dirs, this.#concurrency, (d) => this.#readDir(d)),
       ]);
       if (this.#disposed) return;
       if (active) {
@@ -518,6 +523,20 @@ export class SessionTracker {
       }
     }, this.#throttleMs);
   }
+}
+
+/** `Promise.all(items.map(fn))` with at most `limit` calls running at a time. Order is kept. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 function normalizeInfo(raw: SessionInfo): SessionInfo {

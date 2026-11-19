@@ -52,7 +52,56 @@ It writes the file atomically (a temporary file, then a rename).
 
 ## Keys
 
-Placeholder. The in-app `?` overlay is the source of truth for the key bindings.
+The in-app `?` overlay is the source of truth for the key bindings. `v` switches between the
+projects view and the inbox view; the program starts in the view that was shown last.
+
+## Inbox view
+
+The inbox view shows one list of the sessions of all projects (the root folders and their
+worktrees), with the pane at the right. Archived sessions and child sessions are not in it.
+The list has five sections, in this order:
+
+| Section | A session is here when |
+| --- | --- |
+| Needs input | a permission request or a form waits for you (always first; it ends a snooze) |
+| Working | a turn is in progress, and the session is not snoozed |
+| Open | every other session; sessions that came back from a snooze (`back`) or have an unseen turn come first |
+| Snoozed | its snooze time is not reached yet |
+| Settled | you settled it, and it had no activity since (collapsed; `E` shows it) |
+
+Snooze and settle are this program's own marks, kept in `state.json`. They do not change the
+session in OpenCode, and OpenCode's archive is a different thing.
+
+- **Snooze** hides a session until a time: 1 hour, 3 hours, tomorrow 09:00, next Monday 09:00
+  (on a Monday: the Monday of next week), or until it needs input. Times are local. A request
+  for input ends the snooze at once and for good. When the time passes, the session returns to
+  Open with a `back` tag; opening the session removes the tag.
+- **Settle** means "done for now". It is not possible while the session works or needs input.
+  A settled session returns to Open (or Working) by itself when it has new activity.
+- A snooze deletes a settle mark, and a settle deletes a snooze.
+
+| Key | Action |
+| --- | --- |
+| `v` | Switch to the projects view (the selected session goes along) |
+| `j`/`k`, arrows, `PgUp`/`PgDn`, `Home`/`End`, `Ctrl+d`/`Ctrl+u`, wheel | Move or scroll; headers are skipped |
+| click, double click | A click selects; a double click opens like `Enter` |
+| `Enter` | Open the session in the pane and focus the pane |
+| `l`, `→`, `Tab` | Focus the pane when the session is open |
+| `s` | Snooze menu: `1` 1 hour, `3` 3 hours, `t` tomorrow 09:00, `w` next Monday 09:00, `i` until it needs input, `u` remove the snooze, `Esc` cancel |
+| `e` | Settle, or unsettle a settled session |
+| `u` | Back to Open: remove the snooze or the settle mark |
+| `E` | Show or hide the Settled section |
+| `n` | New session in the folder of the selected session |
+| `r`, `a`, `d` | Rename, archive, delete (as in the Sessions column; delete also drops the marks) |
+| `g` | Show the session in the projects view |
+| `]`, `[` | Next / previous session that wants attention (needs input, then unseen or back) |
+| `O`, `z`, `R`, `?`, `q` | Full window, zoom, refresh, help, quit (as in the projects view) |
+| `Ctrl+q` | In the pane: back to the list |
+
+In the projects view, `s` and `e` in the Sessions column set the same marks. A row with an active
+snooze shows `zz`, a settled row shows `✓`.
+
+The width of the inbox list is `ui.inboxWidth` in `state.json` (default 56, minimum 30).
 
 ## Tests
 
