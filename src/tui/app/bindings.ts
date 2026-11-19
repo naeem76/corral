@@ -77,7 +77,7 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('session-handoff', 'sessions', ['O'], 'full window', 'Open the session in the full window (suspends this program)'),
 
     // Every column.
-    b('enter', 'columns', ['enter'], 'open', 'Drill in; on a session: open it in the pane', { footer: true }),
+    b('enter', 'columns', ['enter'], 'open', 'Drill in; on a session: open it in the pane (also a double click; one click selects)', { footer: true }),
     b('move', 'columns', ['j', 'k', 'down', 'up'], 'move', 'Move the selection (also PgUp/PgDn, Home/End, mouse wheel)', { passive: true }),
     b('half-down', 'columns', ['ctrl+d'], 'half down', 'Half a column down'),
     b('half-up', 'columns', ['ctrl+u'], 'half up', 'Half a column up'),

@@ -123,6 +123,8 @@ export interface AppDeps {
 
 export type Focus = 'projects' | 'git' | 'sessions' | 'pane';
 const COLUMNS: Focus[] = ['projects', 'git', 'sessions'];
+/** Longest pause between the two clicks of a double click. */
+const DOUBLE_CLICK_MS = 400;
 
 export type GitRow =
   | { kind: 'checkout'; checkout: Checkout }
@@ -305,6 +307,7 @@ export class App {
   }
 
   #needing: Promise<boolean> | null = null;
+  #lastClick: { col: Focus; key: string | null; at: number } | null = null;
 
   async connectService(): Promise<void> {
     try {
@@ -818,9 +821,22 @@ export class App {
         const outer = lay.columns[i] as Rect;
         if (!rectContains(outer, ev.x, ev.y)) continue;
         const col = COLUMNS[i] as 'projects' | 'git' | 'sessions';
-        if (ev.action === 'down') this.focus = col;
+        if (ev.action === 'down' && this.focus !== col) {
+          this.focus = col;
+          this.onFocusChanged();
+        }
+        const before = this.lists[col].selectedKey;
         const r = this.listInput(col, ev, this.listRect(col, lay));
-        if (r.activated) this.run('enter');
+        if (ev.action !== 'down' || ev.button !== 'left') return;
+        // One click selects and focuses. Only a second click on the same row acts as Enter:
+        // Enter on a project moves the focus to the next column, which a single click must not do.
+        const key = this.lists[col].selectedKey;
+        const onRow = r.activated || key !== before;
+        const now = this.deps.now();
+        const last = this.#lastClick;
+        const double = r.activated && last !== null && last.col === col && last.key === key && now - last.at <= DOUBLE_CLICK_MS;
+        this.#lastClick = onRow && !double ? { col, key, at: now } : null;
+        if (double) this.run('enter');
         return;
       }
     }

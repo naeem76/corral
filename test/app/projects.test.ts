@@ -85,9 +85,10 @@ test('the prompt reports a missing folder and keeps the modal open', async () =>
     await h.type('n');
     await h.type('\x15');
     await h.type(path.join(h.dir, 'does-not-exist'), 30);
-    await h.type('\r', 120);
+    await h.type('\r');
+    // The folder check is asynchronous: wait for its message, not for a fixed time.
+    await until(() => /not a folder|no such folder/.test(h.text()), 3000, 'missing-folder message');
     assert.equal(modal(h)?.kind, 'browser');
-    assert.match(h.text(), /not a folder|no such folder/);
     await h.type(ESC, 30);
     assert.equal(modal(h), null);
     assert.equal(h.store.projects.length, 0);
