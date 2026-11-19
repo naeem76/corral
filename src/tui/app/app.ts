@@ -304,6 +304,8 @@ export class App {
     this.draw();
   }
 
+  #needing: Promise<boolean> | null = null;
+
   async connectService(): Promise<void> {
     try {
       await this.deps.ensureService();
@@ -316,6 +318,27 @@ export class App {
       this.error(`OpenCode service not available: ${this.serviceError}. Run "node src/main.ts doctor" for details.`);
     }
     this.invalidate();
+  }
+
+  /**
+   * Before a user action that needs the service: when the service is gone (stopped, killed,
+   * restarted on another port), find it or start it again. Background reconnects never start
+   * it, so a service that the user stopped on purpose stays stopped until the user acts.
+   */
+  async needService(): Promise<boolean> {
+    if (this.service === 'ok' && this.deps.tracker.connected) return true;
+    this.#needing ??= (async () => {
+      try {
+        await this.connectService();
+        if (this.service !== 'ok') return false;
+        // The service can be back with a new URL and password.
+        await this.deps.client.connection(true).catch(() => {});
+        return true;
+      } finally {
+        this.#needing = null;
+      }
+    })();
+    return this.#needing;
   }
 
   async cleanupStale(): Promise<void> {
@@ -1137,8 +1160,10 @@ export class App {
       void this.loadCheckouts(p, true);
       if (this.prsAvailable) void this.loadPrs(p);
     }
-    void this.deps.tracker.refresh().catch((err) => this.log(`refresh: ${errorText(err)}`));
     this.flash('Refreshing…');
+    void this.needService()
+      .then((up) => (up ? this.deps.tracker.refresh() : undefined))
+      .catch((err) => this.log(`refresh: ${errorText(err)}`));
   }
 
   openBrowser(): void {
@@ -1294,10 +1319,7 @@ export class App {
       this.flash('Select a project first.');
       return;
     }
-    if (this.service === 'down' && !this.deps.tracker.connected) {
-      this.error('The OpenCode service is not available.');
-      return;
-    }
+    if (!(await this.needService())) return;
     this.flash('Creating a session…');
     try {
       const id = await this.deps.tracker.create(dir);
@@ -1334,6 +1356,8 @@ export class App {
       return;
     }
     if (this.panes.isOpening(s.id)) return;
+    if (!(await this.needService())) return;
+    if (this.panes.has(s.id) || this.panes.isOpening(s.id)) return;
     const { cols, rows } = this.paneSize();
     this.notes.delete(s.id);
     this.flash('Starting OpenCode…');

@@ -101,7 +101,7 @@ export async function runApp(argv: string[]): Promise<number> {
     openPty: (spawn) => openPty(client, spawn, { onError: (err) => log(`pty: ${err.message}`) }),
     createEmulator: (cols, rows) => createEmulator(cols, rows),
     ensureService: async () => {
-      const info = await ensureService();
+      const info = await ensureService({ isAlive: defaultIsAlive });
       password = info.password;
     },
     runChild: runInheritedChild,

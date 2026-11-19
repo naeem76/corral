@@ -140,3 +140,39 @@ test('timeout and abort', async () => {
     await fake.close();
   }
 });
+
+test('ensureService treats the file of a dead service as absent and starts the service', async () => {
+  let started = 0;
+  const calls: string[][] = [];
+  const s = await ensureService({
+    env: {},
+    platform: 'linux',
+    homedir: '/h',
+    // A killed service left its file behind; after the start a new file names a live pid.
+    readFile: async () => (started ? '{"url":"http://a:2","password":"q","pid":20}' : '{"url":"http://a:1","password":"p","pid":10}'),
+    isAlive: (pid) => pid === 20,
+    resolve: () => ({ ok: true, path: '/bin/opencode' }),
+    run: async (file, args) => {
+      calls.push([file, ...args]);
+      started++;
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    sleep: async () => {},
+  });
+  assert.equal(s.url, 'http://a:2');
+  assert.deepEqual(calls, [['/bin/opencode', 'service', 'start']]);
+});
+
+test('ensureService keeps a file whose service process is alive', async () => {
+  const s = await ensureService({
+    env: {},
+    platform: 'linux',
+    homedir: '/h',
+    readFile: async () => '{"url":"http://a:1","password":"p","pid":10}',
+    isAlive: () => true,
+    run: async () => {
+      throw new Error('must not start the service');
+    },
+  });
+  assert.equal(s.url, 'http://a:1');
+});

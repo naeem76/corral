@@ -274,3 +274,40 @@ test('a script shim: the version comes from the npm package next to it', async (
   const missing = await createLauncher({ ...base, resolve: () => ({ ok: false, reason: 'not-found' }), serviceVersion: async () => '2.3.2' }).prepare();
   assert.ok(missing.ok && missing.command === 'opencode' && /not found on PATH/.test(missing.warning ?? ''));
 });
+
+test('service lost while running: a user action starts it again and then works', async () => {
+  const service = new FakeService();
+  service.down = true;
+  let dir = '';
+  let up = false;
+  let starts = 0;
+  const h = await harness({
+    service,
+    connect: false,
+    // Fails at program start; works when the user acts (the service can be started again).
+    ensureService: async () => {
+      starts++;
+      if (!up) throw new OpenCodeError(0, 'ServiceNotFound', 'OpenCode service is not running');
+      service.down = false;
+    },
+    setupState: async (store, d) => {
+      dir = path.join(d, 'proj');
+      await mkdir(dir);
+      await store.addProject(dir);
+    },
+  });
+  try {
+    assert.match(h.text(), /OpenCode service not available/);
+    const before = starts;
+    await h.type('l');
+    await h.type('l');
+    assert.equal(h.app.focus, 'sessions');
+    up = true;
+    await h.type('n', 60);
+    await until(() => service.requests.some((r) => r.method === 'POST' && r.path === '/api/session'), 2000, 'session create');
+    assert.ok(starts > before, 'the action asked for the service again');
+    assert.ok(!/Cannot create the session/.test(h.text()));
+  } finally {
+    await h.dispose();
+  }
+});

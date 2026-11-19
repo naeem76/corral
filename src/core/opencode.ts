@@ -64,11 +64,21 @@ export interface EnsureDeps extends DiscoverDeps {
   sleep?: (ms: number) => Promise<void>;
   /** Total time to wait for the service file after the start command. */
   waitMs?: number;
+  /**
+   * Tells whether the service process still runs. A killed service leaves its file behind
+   * (always on Windows, where a process cannot clean up), and that file must count as absent.
+   */
+  isAlive?: (pid: number) => boolean;
+}
+
+function usable(info: ServiceInfo | null, isAlive: ((pid: number) => boolean) | undefined): ServiceInfo | null {
+  if (!info || !isAlive || info.source === 'env' || info.pid === undefined) return info;
+  return isAlive(info.pid) ? info : null;
 }
 
 /** Find the service. When it is not running, run `opencode service start` and look again. */
 export async function ensureService(deps: EnsureDeps = {}): Promise<ServiceInfo> {
-  const found = await discoverService(deps);
+  const found = usable(await discoverService(deps), deps.isAlive);
   if (found) return found;
   const resolved = (deps.resolve ?? ((n: string) => resolveExecutable(n, { env: deps.env, platform: deps.platform })))('opencode');
   if (!resolved.ok) throw new OpenCodeError(0, 'ServiceNotFound', `OpenCode service is not running, and ${describeResolveFailure('opencode', resolved)}`);
@@ -80,7 +90,7 @@ export async function ensureService(deps: EnsureDeps = {}): Promise<ServiceInfo>
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   const deadline = deps.waitMs ?? 10_000;
   for (let waited = 0; ; waited += 200) {
-    const again = await discoverService(deps);
+    const again = usable(await discoverService(deps), deps.isAlive);
     if (again) return again;
     if (waited >= deadline) break;
     await sleep(200);
