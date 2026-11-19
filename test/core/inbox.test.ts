@@ -18,7 +18,7 @@ function inp(
   marks: SessionMarks = {},
   extra: { updated?: number; activity?: number; outcome?: Outcome } = {},
 ): InboxInput {
-  const row: SessionRow = { id, title: id, directory: '/w/p', created: 1, updated: extra.updated ?? 100, status, archived: false };
+  const row: SessionRow = { id, agent: 'opencode', title: id, directory: '/w/p', created: 1, updated: extra.updated ?? 100, status, archived: false };
   if (extra.outcome) row.outcome = extra.outcome;
   return { row, activity: extra.activity ?? 0, marks, project };
 }

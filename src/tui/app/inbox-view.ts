@@ -76,18 +76,17 @@ export class InboxView {
 
   /** Every top-level, non-archived session in the folders of the registered projects. */
   inputs(): InboxInput[] {
-    const { store, tracker, platform } = this.app.deps;
+    const { store, hub, platform } = this.app.deps;
     const out: InboxInput[] = [];
     const seen = new Set<string>();
     for (const project of store.projects) {
       const checkouts = this.app.checkoutsOf(project);
       for (const dir of this.app.projectDirs(project)) {
         const checkout = checkouts.find((c) => samePath(c.path, dir, platform));
-        for (const row of tracker.rows(dir)) {
+        for (const row of hub.rows(dir)) {
           if (row.archived || seen.has(row.id)) continue;
           seen.add(row.id);
-          const t = tracker.get(row.id)?.time;
-          const activity = Math.max(t?.busy ?? 0, t?.idle ?? 0);
+          const activity = hub.activity(row.id);
           const input: InboxInput = { row, activity, marks: { ...(store.sessionMeta(row.id) ?? {}) }, project };
           if (checkout) input.checkout = checkout;
           out.push(input);
@@ -136,9 +135,8 @@ export class InboxView {
     if (known) return known;
     const project = this.app.deps.store.projects.find((p) => this.app.projectDirs(p).some((d) => samePath(d, row.directory, this.app.deps.platform)));
     if (!project) return undefined;
-    const t = this.app.deps.tracker.get(row.id)?.time;
     const marks = { ...(this.app.deps.store.sessionMeta(row.id) ?? {}) };
-    return classify({ row, activity: Math.max(t?.busy ?? 0, t?.idle ?? 0), marks, project }, this.app.deps.now());
+    return classify({ row, activity: this.app.deps.hub.activity(row.id), marks, project }, this.app.deps.now());
   }
 
   /** Time when a snooze ends next (the view must change then), or null. */
@@ -293,7 +291,8 @@ export class InboxView {
           this.app.flash('Select a session first, or use the projects view (v) to start one in a project.');
           return true;
         }
-        void this.app.newSession(s.row.directory);
+        // The agent of the selected session, without a menu.
+        void this.app.newSession(s.row.directory, s.row.agent);
         return true;
       }
       default:
@@ -418,7 +417,7 @@ export class InboxView {
     // Not earlier than the last activity: the service clock can be ahead of this machine.
     const at = Math.max(this.app.deps.now(), e?.activity ?? 0);
     this.app.deps.store.setSessionMeta(row.id, { settledAt: at, snoozedUntil: undefined, snoozedAt: undefined });
-    this.app.deps.tracker.markSeen(row.id);
+    this.app.deps.hub.markSeen(row.id);
     this.#afterMark();
     this.app.flash(this.app.view === 'inbox' && !this.showSettled ? 'Settled. E shows the Settled section.' : 'Settled.');
   }

@@ -5,6 +5,7 @@
 
 import path from 'node:path';
 import type { SessionRow, SessionStatus } from '../../types.ts';
+import { AGENT_NAMES } from '../../types.ts';
 import { truncate, truncateStart, wrapText, type Frame, type Rect } from '../frame.ts';
 import { defaultTheme, statusDot, style, withStyle, type Style } from '../style.ts';
 import { stringWidth } from '../../width.ts';
@@ -20,6 +21,7 @@ import { clean, relativeTime, tildify } from './format.ts';
 import { formatSnooze, formatTime } from '../../core/inbox.ts';
 import { SECTION_TITLES } from './inbox-view.ts';
 import type { App, GitRow } from './app.ts';
+import { agentHelpLines, agentMode, agentTag, emptySessionsText, INSTALL_HINT, openHint, opencodeDown, serviceBadge } from './agents.ts';
 import type { AppLayout } from './layout.ts';
 
 const th = defaultTheme;
@@ -166,13 +168,12 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
   const items = app.sessionItems();
   const sel = focused ? th.selection : th.selectionDim;
   const now = app.deps.now();
-  const down = app.service === 'down' && !app.deps.tracker.connected;
   renderList(f, list, items, app.lists.sessions, {
     focused,
     rowHeight: 1,
     selectedStyle: sel,
     scrollbar: { x: outer.x + outer.w - 1, style: th.scrollThumb },
-    empty: { text: down ? 'OpenCode service not available.' : app.checkoutPath ? 'No sessions. n starts one.' : '', style: th.dim },
+    empty: { text: emptySessionsText(app), style: th.dim },
     renderRow: (fr, r, item: ListItem<SessionRow>, info) => {
       const bg = info.selected ? sel : null;
       const s = item.data;
@@ -181,7 +182,8 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
       const live = app.panes.has(s.id);
       const time = relativeTime(s.updated, now);
       const tag = markTag(app, s);
-      const right = (live ? '▸ ' : '') + (tag ? tag + ' ' : '') + time;
+      const agent = agentTag(app, s);
+      const right = (live ? '▸ ' : '') + (agent ? agent + ' ' : '') + (tag ? tag + ' ' : '') + time;
       const rw = stringWidth(right);
       const t = clean(s.title) || 'New session';
       fr.text(r.x + 3, r.y, truncate(t, Math.max(1, r.w - 4 - rw)), onBg(s.archived || !s.title ? th.dim : th.text, bg));
@@ -225,7 +227,7 @@ export function drawPane(f: Frame, app: App, lay: AppLayout): void {
 }
 
 function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefined): void {
-  f.box(outer.x, outer.y, outer.w, outer.h, th.borderStyle, s ? clean(s.title) || 'New session' : 'OpenCode', { border: th.border, titleStyle: th.titleStyle });
+  f.box(outer.x, outer.y, outer.w, outer.h, th.borderStyle, s ? clean(s.title) || 'New session' : 'Session', { border: th.border, titleStyle: th.titleStyle });
   const r = inset(outer, 1, 2);
   f.pushClip(r);
   let y = r.y + 1;
@@ -235,11 +237,29 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
       f.text(r.x, y++, l, st, r.w);
     }
   };
-  if (app.service === 'down' && !app.deps.tracker.connected) {
+  const mode = agentMode(app);
+  // Without Copilot, a dead service leaves nothing to show; with it, only OpenCode rows suffer.
+  const down = opencodeDown(app);
+  if (down && (mode !== 'both' || s?.agent !== 'copilot')) {
     line('The OpenCode service is not available.', th.danger);
     if (app.serviceError) line(app.serviceError, th.muted);
     y++;
     line('Run "node src/main.ts doctor" for details. This program retries in the background.', th.dim);
+    if (mode === 'both' && !s) {
+      y++;
+      line('Copilot sessions work without it (they open in the full window).', th.dim);
+    }
+    if (mode !== 'both' || !s) {
+      f.popClip();
+      return;
+    }
+    y++;
+  }
+  if (mode === 'none') {
+    line('No agent found on this machine.', th.danger);
+    y++;
+    line(INSTALL_HINT, th.dim);
+    line('Run "node src/main.ts doctor" for details.', th.dim);
     f.popClip();
     return;
   }
@@ -253,6 +273,8 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
   const now = app.deps.now();
   line(clean(s.title) || '(no title)', th.titleFocusedStyle);
   y++;
+  f.text(r.x, y, 'Agent     ', th.dim);
+  f.text(r.x + 10, y++, AGENT_NAMES[s.agent], th.text, r.w - 10);
   f.text(r.x, y, 'Status    ', th.dim);
   dotAt(f, r.x + 10, y, s.status, null);
   f.text(r.x + 12, y++, STATUS_TEXT[s.status] + (s.archived ? ' (archived)' : ''), th.text, r.w - 12);
@@ -273,8 +295,8 @@ function drawInfoPanel(f: Frame, app: App, outer: Rect, s: SessionRow | undefine
     line(note, th.danger);
     y++;
   }
-  if (app.panes.isOpening(s.id)) line('Starting OpenCode…', th.muted);
-  else line('Enter opens the session here. O opens it in the full window.', th.muted);
+  if (app.panes.isOpening(s.id)) line(`Starting ${AGENT_NAMES[s.agent]}…`, th.muted);
+  else line(openHint(app, s), th.muted);
   f.popClip();
 }
 
@@ -292,12 +314,6 @@ function inboxText(app: App, s: SessionRow, now: number): string {
 }
 
 // ---- Footer ----------------------------------------------------------------
-
-function serviceBadge(app: App): { text: string; style: Style } {
-  if (app.deps.tracker.connected) return { text: '● OpenCode', style: style(2) };
-  if (app.service === 'down') return { text: '● OpenCode offline', style: style(1) };
-  return { text: '○ connecting', style: style(3) };
-}
 
 export function drawFooter(f: Frame, app: App, r: Rect): void {
   const badge = serviceBadge(app);
@@ -348,7 +364,7 @@ export function drawModalLayer(f: Frame, app: App, screen: Rect): void {
       return;
     }
     case 'help': {
-      const lines = helpLines(app.bindings);
+      const lines = [...helpLines(app.bindings), {}, ...agentHelpLines(app)];
       const width = Math.min(96, screen.w - 2);
       const height = Math.min(lines.length + 3, screen.h - 1);
       const view = height - 3;

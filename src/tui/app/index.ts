@@ -1,10 +1,15 @@
 // Composition root: build the real parts, open the terminal, run the App until it quits.
 
 import os from 'node:os';
+import path from 'node:path';
+import type { AgentId } from '../../types.ts';
 import {
-  createGit, discoverService, ensureService, envGet, OpenCodeClient, openPty, resolveExecutable, run,
+  copilotHome, createGit, discoverService, ensureService, envGet, OpenCodeClient, openPty, resolveExecutable, run,
   SessionTracker, stateDir, Store, type ServiceInfo,
 } from '../../core/index.ts';
+import { CopilotSource } from '../../core/copilot.ts';
+import { resolveCopilotLaunch } from '../../core/copilot-launch.ts';
+import { SessionHub } from '../../core/session-hub.ts';
 import { createAzurePrProvider } from '../../core/pr-azure.ts';
 import { createEmulator } from '../../term/index.ts';
 import { detectColorDepth } from '../style.ts';
@@ -18,7 +23,7 @@ import { openUrl } from './open-url.ts';
 import { defaultIsAlive } from './stale.ts';
 
 export { App, createApp } from './app.ts';
-export type { AppDeps, AppStore, AppTracker, TerminalLike } from './app.ts';
+export type { AppDeps, AppSessions, AppStore, TerminalLike } from './app.ts';
 
 export async function runApp(argv: string[]): Promise<number> {
   if (argv.length > 0) {
@@ -86,17 +91,56 @@ export async function runApp(argv: string[]): Promise<number> {
   }
 
   const tracker = new SessionTracker({ client, store, onError: (err) => log(`tracker: ${err.message}`) });
+  // Copilot has no "viewed" mark: turns that ended before the first run with Copilot count as seen.
+  if (typeof store.ui.copilotSeenSince !== 'number') store.setUi({ copilotSeenSince: Date.now() });
+  const cpHome = copilotHome(env, platform, homedir);
+  const copilotLaunch = () => resolveCopilotLaunch({ env, platform });
+  const copilot = new CopilotSource({
+    home: cpHome,
+    store,
+    launch: copilotLaunch,
+    seenSince: () => (typeof store.ui.copilotSeenSince === 'number' ? store.ui.copilotSeenSince : 0),
+    onError: (err) => log(`copilot: ${err.message}`),
+  });
+  // A program in the service PTY does not see our environment: name the home when it is not the default.
+  const copilotEnv = (): Record<string, string> =>
+    path.resolve(cpHome) === path.resolve(homedir, '.copilot') ? {} : { COPILOT_HOME: cpHome };
+  const saved = store.ui.defaultAgent;
+  const hub = new SessionHub(
+    [
+      { agent: 'opencode', source: tracker },
+      { agent: 'copilot', source: copilot },
+    ],
+    { defaultAgent: saved === 'copilot' || saved === 'opencode' ? saved : undefined, onError: (err) => log(`sessions: ${err.message}`) },
+  );
+  const installedAt = new Map<AgentId, { at: number; yes: boolean }>();
+  const agentInstalled = (agent: AgentId): boolean => {
+    const c = installedAt.get(agent);
+    if (c && Date.now() - c.at < 60_000) return c.yes;
+    let yes: boolean;
+    if (agent === 'copilot') yes = copilot.programFound;
+    else {
+      const r = resolveExecutable('opencode');
+      // A shim counts: the user may start the service by hand, so its absence is an error.
+      yes = r.ok || r.reason === 'shim' || !!envGet(env, 'NEBULA_OPENCODE_URL', platform);
+    }
+    installedAt.set(agent, { at: Date.now(), yes });
+    return yes;
+  };
   const deps: AppDeps = {
     terminal,
     store,
     git,
-    tracker,
+    hub,
+    agentInstalled,
     client,
     prs: createAzurePrProvider(),
     launcher: createLauncher({
       resolve: (n) => resolveExecutable(n),
       run,
       serviceVersion: async () => (await discover())?.version,
+      copilot: copilotLaunch,
+      copilotEnv,
     }),
     openPty: (spawn) => openPty(client, spawn, { onError: (err) => log(`pty: ${err.message}`) }),
     createEmulator: (cols, rows) => createEmulator(cols, rows),

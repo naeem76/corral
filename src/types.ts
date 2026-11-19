@@ -172,9 +172,18 @@ export interface PullRequest {
  */
 export type SessionStatus = 'needs-input' | 'working' | 'unseen' | 'idle';
 
+/** The agent program that owns a session. */
+export type AgentId = 'opencode' | 'copilot';
+
+export const AGENT_NAMES: Record<AgentId, string> = { opencode: 'OpenCode', copilot: 'Copilot' };
+
 export interface SessionRow {
-  /** OpenCode session id ("ses_..."). */
+  /**
+   * Session id of the agent: OpenCode "ses_...", Copilot a UUID. The two forms cannot
+   * collide, so the id alone is the key everywhere (lists, panes, marks in `state.json`).
+   */
   id: string;
+  agent: AgentId;
   title: string;
   /** Absolute path of the directory the session belongs to. */
   directory: string;
@@ -187,13 +196,61 @@ export interface SessionRow {
   outcome?: 'succeeded' | 'failed' | 'interrupted';
 }
 
+/** What a session source can do. The UI hides or explains an action that is not possible. */
+export interface SessionCapabilities {
+  /** The title can be changed from this program. */
+  rename: boolean;
+  /** The session can be deleted from this program. */
+  remove: boolean;
+  /**
+   * 'agent': the agent has its own archive (OpenCode). 'local': the agent has none, so the
+   * archive is the mark `archivedAt` in `state.json` (Copilot).
+   */
+  archive: 'agent' | 'local';
+}
+
+/**
+ * The sessions of one agent. `src/core/sessions.ts` (OpenCode service) and
+ * `src/core/copilot.ts` (Copilot CLI files) implement it; `src/core/session-hub.ts` joins
+ * the sources behind the same interface, and the app talks only to the hub.
+ * A method that takes an id is a no-op (or rejects, for a Promise) for an unknown id.
+ */
+export interface SessionSource {
+  /** False when the agent cannot be used on this machine now (not installed, service down). */
+  readonly available: boolean;
+  /** Tells why `available` is false, for the UI. Null when available. */
+  readonly unavailableReason: string | null;
+  capabilities(agent: AgentId): SessionCapabilities;
+  /** Set the directories to follow. New ones are read at once; dropped ones are forgotten. */
+  watch(directories: readonly string[]): Promise<void>;
+  /** Top-level sessions of a directory, sorted by attention, then by `updated` (newest first). */
+  rows(directory: string): SessionRow[];
+  /** One row by id, when the source knows the session. */
+  row(id: string): SessionRow | undefined;
+  /** Start or end of the last turn (see `InboxInput.activity`); 0 when unknown. */
+  activity(id: string): number;
+  status(id: string): SessionStatus;
+  /** The user looked at the session now. */
+  markSeen(id: string): void;
+  /** Make a session in a directory and return its id. The row exists when the Promise resolves. */
+  create(directory: string, title?: string): Promise<string>;
+  rename(id: string, title: string): Promise<void>;
+  archive(id: string): Promise<void>;
+  unarchive(id: string): Promise<void>;
+  remove(id: string): Promise<void>;
+  /** Read the state again (all watched directories, or the given ones). */
+  refresh(directories?: readonly string[]): Promise<void>;
+  onChange(cb: () => void): () => void;
+  dispose(): void;
+}
+
 // ---------------------------------------------------------------------------
 // Inbox view (src/core/inbox, src/tui/app)
 // ---------------------------------------------------------------------------
 
 /**
- * The program's own marks for one session, stored in `state.json` under the OpenCode session
- * id. OpenCode knows nothing about them. All times are milliseconds since epoch.
+ * The program's own marks for one session, stored in `state.json` under the session id.
+ * The agent knows nothing about them. All times are milliseconds since epoch.
  */
 export interface SessionMarks {
   /** When the user last looked at the session in this program. */
@@ -207,6 +264,8 @@ export interface SessionMarks {
   snoozedUntil?: number;
   /** When the user set the snooze. Set and deleted together with `snoozedUntil`. */
   snoozedAt?: number;
+  /** Archive mark for an agent that has no archive of its own (see `SessionCapabilities`). */
+  archivedAt?: number;
   /**
    * When the user settled the session ("done for now"). It counts only while the session has
    * no activity later than this time, so a settled session comes back by itself.

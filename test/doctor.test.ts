@@ -21,6 +21,7 @@ import {
 import { createAzurePrProvider } from '../src/core/pr-azure.ts';
 import { resolveExecutable, run as realRun, type ResolveResult, type Runner } from '../src/core/exe.ts';
 import { AUTH, PASSWORD, startFakeServer, type FakeServer, type FakeSocket } from './core/fake-server.ts';
+import type { CopilotLaunch } from '../src/core/copilot-launch.ts';
 
 const B64 = AUTH.slice(6);
 const TMP = os.tmpdir();
@@ -475,4 +476,83 @@ test('visible / describeEvent / pathForms', () => {
     'c:\\work\\repo',
   ]);
   assert.deepEqual(pathForms('/tmp/x', 'linux'), [['as given', '/tmp/x'], ['trailing separator', '/tmp/x/']]);
+});
+
+test('doctor: Copilot is optional; missing, it is a WARN and the run passes', async () => {
+  const { d, stdout } = await deps(null, {
+    env: { NO_COLOR: '1', NEBULA_COPILOT_HOME: path.join(TMP, 'no-such-copilot-home') },
+    copilot: () => ({ ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' }),
+  });
+  const code = await runDoctor(['--only', 'copilot'], d);
+  const t = stdout.text;
+  assert.equal(code, 0, t);
+  assert.match(line(t, 'copilot program'), /WARN .*not found on PATH/);
+  assert.match(line(t, 'copilot --version'), /SKIP/);
+  assert.match(line(t, 'Copilot home'), /WARN .*no session-state folder/);
+  assert.match(t, /0 FAIL/);
+});
+
+test('doctor --copilot: the branch, the version, and a structure dump without content', async () => {
+  const home = await mkdtemp(path.join(TMP, 'nd-copilot-'));
+  try {
+    const { mkdir: mk, writeFile: wf } = await import('node:fs/promises');
+    const secretDir = path.join(TMP, 'very-private-project');
+    for (let i = 0; i < 4; i++) {
+      const id = `aaaaaaaa-0000-4000-8000-00000000000${i}`;
+      const dir = path.join(home, 'session-state', id);
+      await mk(dir, { recursive: true });
+      await wf(path.join(dir, 'workspace.yaml'), `id: ${id}\ncwd: ${secretDir}\nclient_name: github/cli\nname: SECRET PROMPT ${i}\ncreated_at: 2026-11-19T14:14:02.455Z\nupdated_at: 2026-11-19T14:14:15.489Z\n`);
+      const ev = [
+        { type: 'session.start', timestamp: '2026-11-19T14:15:32.423Z', data: { context: { cwd: secretDir } } },
+        { type: 'user.message', timestamp: '2026-11-19T14:15:45.510Z', data: { content: 'SECRET TEXT' } },
+        { type: 'assistant.turn_start', timestamp: '2026-11-19T14:15:45.533Z', data: {} },
+        { type: 'tool.execution_start', timestamp: '2026-11-19T14:15:45.545Z', data: { arguments: { command: 'SECRET ARG' } } },
+        { type: 'permission.requested', timestamp: '2026-11-19T14:15:45.568Z', data: { requestId: 'r1' } },
+      ];
+      await wf(path.join(dir, 'events.jsonl'), ev.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    }
+    await mk(path.join(home, 'session-state', '.session-operation-locks'), { recursive: true });
+    const seen: string[][] = [];
+    const { d, stdout } = await deps(null, {
+      env: { NO_COLOR: '1', COPILOT_HOME: home },
+      copilot: () => ({ ok: true, kind: 'native', command: '/npm/node_modules/@github/copilot-win32-x64/copilot.exe', args: [], shim: '/npm/copilot.cmd' }),
+      run: async (file, args, opts) => {
+        seen.push([file, ...args, String(opts?.env?.COPILOT_AUTO_UPDATE)]);
+        return { code: 0, stdout: 'GitHub Copilot CLI 1.0.114\n', stderr: '' };
+      },
+    });
+    const code = await runDoctor(['--only', 'copilot', '--copilot'], d);
+    const t = stdout.text;
+    assert.equal(code, 0, t);
+    assert.match(line(t, 'copilot program'), /PASS .*copilot\.exe \(the native program behind the npm shim: \/npm\/copilot\.cmd\)/);
+    assert.match(line(t, 'copilot --version'), /PASS .* 1\.0\.114$/);
+    assert.deepEqual(seen, [['/npm/node_modules/@github/copilot-win32-x64/copilot.exe', '--version', 'false']]);
+    assert.match(line(t, 'Copilot sessions'), /4 session\(s\)/);
+    assert.match(t, /3 newest of 4 session\(s\)/);
+    assert.match(t, /#1 id is a UUID; workspace\.yaml keys: id, cwd, client_name, name, created_at, updated_at/);
+    assert.match(t, /#1 client_name=github\/cli; created_at=2026-11-19T14:14:02\.455Z/);
+    assert.match(t, /session\.start x1, user\.message x1, assistant\.turn_start x1, tool\.execution_start x1, permission\.requested x1/);
+    assert.match(t, /requests with requestId: 1\/1; last event: permission\.requested/);
+    assert.ok(!/#4/.test(t), 'only three sessions');
+    for (const secret of ['SECRET', 'very-private-project', 'aaaaaaaa-']) assert.ok(!t.includes(secret), `${secret} leaked`);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('doctor: without OpenCode but with Copilot, the OpenCode lines are WARN and the run passes', async () => {
+  const noOpenCode = fakeResolve({});
+  const copilot = (): CopilotLaunch => ({ ok: true, kind: 'exe', command: '/opt/copilot/copilot', args: [] });
+  const groups = ['--only', 'cli,service,copilot'];
+  const withCopilot = await deps(null, { resolve: noOpenCode, copilot, run: async () => ({ code: 0, stdout: 'GitHub Copilot CLI 1.0.114\n', stderr: '' }) });
+  const code = await runDoctor(groups, withCopilot.d);
+  const t = withCopilot.stdout.text;
+  assert.equal(code, 0, t);
+  assert.match(line(t, 'opencode on PATH'), /WARN .*not found on PATH \(OpenCode is not installed: Copilot only/);
+  assert.match(t, /0 FAIL/);
+
+  // With neither agent the run still fails.
+  const none = await deps(null, { resolve: noOpenCode, copilot: () => ({ ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' }) });
+  assert.equal(await runDoctor(groups, none.d), 1, none.stdout.text);
+  assert.match(line(none.stdout.text, 'opencode on PATH'), /FAIL/);
 });

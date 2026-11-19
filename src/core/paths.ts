@@ -100,3 +100,17 @@ export function opencodeStateDirs(env: Env, platform: NodeJS.Platform, homedir: 
     return true;
   });
 }
+
+/**
+ * Home folder of the GitHub Copilot CLI (holds `session-state/`).
+ * `NEBULA_COPILOT_HOME` first (to point this program elsewhere without moving Copilot), then
+ * Copilot's own `COPILOT_HOME`, then `~/.copilot`. Copilot ignores the XDG variables.
+ */
+export function copilotHome(env: Env, platform: NodeJS.Platform, homedir: string): string {
+  const p = api(platform);
+  const own = envGet(env, 'NEBULA_COPILOT_HOME', platform);
+  if (own) return p.resolve(own);
+  const cp = envGet(env, 'COPILOT_HOME', platform);
+  if (cp) return p.resolve(cp);
+  return p.join(homedir, '.copilot');
+}

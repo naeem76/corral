@@ -1,6 +1,6 @@
 # nebula-enterprise
 
-A terminal program that manages OpenCode sessions: a Projects column, a Git column
+A terminal program that manages OpenCode and GitHub Copilot CLI sessions: a Projects column, a Git column
 (checkouts, worktrees, pull requests, and folders without Git), a Sessions column, and a pane
 that shows the OpenCode TUI. A second view, the inbox, shows the same sessions in sections
 with snooze and settle.
@@ -84,6 +84,47 @@ docs/opencode-openapi-2.3.2.json   OpenAPI document of the service, saved from 2
   `CSI ?u`, mode queries `CSI ?…$p`, OSC 10/11 colors, XTVERSION `CSI >0q`).
 - `opencode --session <id>` continues a session, or creates it when the id does not exist.
 
+## Copilot CLI: verified facts (GitHub Copilot CLI 1.0.114, Linux)
+
+Checked by experiment with the CLI in offline mode against a fake local model (see
+`test/copilot/manual/`). No GitHub login and no network are necessary for such a check.
+
+- Home: `$COPILOT_HOME`, default `~/.copilot`. Not moved by the XDG variables.
+- One folder per session: `<home>/session-state/<session-id>/`. The id is a UUID.
+  - `workspace.yaml`: flat `key: value` lines. Seen keys: `id`, `cwd`, `client_name`,
+    `last_client_name`, `name` (the title; the first prompt until the user renames),
+    `user_named`, `summary_count`, `fork_count`, `created_at`, `updated_at` (ISO 8601).
+  - `events.jsonl`: one JSON object per line: `{ id, timestamp, parentId, type, data }`
+    (`ephemeral` events are not written). It grows fast: about 29 KB for one short prompt,
+    because the system message is in it. Never read the whole file to get the status.
+  - Other entries: `checkpoints/`, `files/`, `research/`, `rewind-file-snapshots/`, lock files.
+- `<home>/session-store.db` is an SQLite index of the sessions. Do not read or write it.
+  `<home>/session-state/.session-operation-locks/<id>.lock` are empty files that stay after
+  the program exits: they do not tell whether a session is in use.
+- Event order seen for one prompt with one tool call:
+  `session.start`, `user.message`, `assistant.turn_start`, `assistant.message`,
+  `tool.execution_start`, [`permission.requested`, `permission.completed`],
+  `tool.execution_complete`, `assistant.turn_end`, then again `assistant.turn_start` …
+  `assistant.turn_end` for the next model call, and `session.shutdown` when the program exits.
+  One user prompt gives several `turn_start`/`turn_end` pairs. `abort` is written when the
+  user interrupts. While a permission question waits, `permission.requested` is the last line.
+  Documented but not seen here: `user_input.requested`/`.completed`,
+  `elicitation.requested`/`.completed`, `exit_plan_mode.requested`/`.completed`,
+  `session.error`, `subagent.*` (https://github.com/microsoft/copilot-sdk, docs/features/streaming-events.md).
+- `copilot --session-id <uuid>` resumes that session, or starts a new session with that id.
+  The session folder appears when the program starts. `copilot --resume=<id>` resumes only.
+  `-C <dir>` sets the working directory.
+- The first start in a folder shows a "trust this folder" question in the TUI.
+- The npm package `@github/copilot` is a small loader (`npm-loader.js`) plus one native
+  package per platform (`@github/copilot-linux-x64/copilot`,
+  `@github/copilot-win32-x64/copilot.exe`). On Windows the npm shim is `copilot.cmd`, which
+  cannot run there: resolve the real `.exe`. **Not verified on Windows.**
+- Offline test setup: `COPILOT_OFFLINE=true`, `COPILOT_PROVIDER_BASE_URL=http://127.0.0.1:<port>/v1`,
+  `COPILOT_PROVIDER_API_KEY=x`, `COPILOT_MODEL=<any name>`, `COPILOT_AUTO_UPDATE=false`, and a
+  scratch `COPILOT_HOME`. Never use the owner's `~/.copilot` in a test.
+- There is no service and no event stream. The SDK (`@microsoft/copilot-sdk`) has native
+  dependencies and is not permitted here; use the files.
+
 ## Safety rules for the live service on the development machine
 
 The service on this machine holds the owner's real sessions.
@@ -124,6 +165,18 @@ projects view and the inbox view; the choice is saved in `ui.view` (`'projects'`
   snooze time passed returns to Open with a "back" tag until the user opens it.
 - Settle means "done for now". A settled session returns to Open or Working by itself when it
   has new activity.
+
+## Product scope (stage 3): Copilot CLI sessions
+
+The program also lists, starts and resumes GitHub Copilot CLI sessions, next to OpenCode ones.
+
+- Each session row has an agent (`AgentId`). The contract is `SessionSource` in `src/types.ts`;
+  the app talks to one hub that joins the OpenCode source and the Copilot source.
+- Copilot sessions come from the files in the Copilot home. The status comes from the tail of
+  `events.jsonl`.
+- The pane needs a pseudo-terminal, and only the OpenCode service has one. With the service,
+  a Copilot session runs in the pane. Without it, a Copilot session opens in the full window.
+- The program must be useful on a machine that has only Copilot (no OpenCode at all).
 
 Own state: one JSON file (`state.json`) in the user data directory
 (`%LOCALAPPDATA%\nebula-enterprise` on Windows, `$XDG_STATE_HOME/nebula-enterprise` or

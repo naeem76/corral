@@ -232,7 +232,12 @@ export interface Theme {
    * Marks of the inbox shown in the Sessions column: an active snooze and an effective settle.
    * Each must exist in Cascadia Mono (the Windows Terminal default font).
    */
-  glyphs: { snoozed: string; settled: string };
+  glyphs: {
+    snoozed: string;
+    settled: string;
+    /** Short dim tag of the agent of a session row, shown when more than one agent is in use. */
+    agent: { opencode: string; copilot: string };
+  };
 }
 
 const ACCENT = 6; // cyan
@@ -268,7 +273,7 @@ export const defaultTheme: Theme = {
   scrollThumb: style(7),
   danger: style(RED, COLOR_DEFAULT, ATTR.bold),
   status: { 'needs-input': RED, working: YELLOW, unseen: GREEN, idle: GRAY },
-  glyphs: { snoozed: 'zz', settled: '✓' },
+  glyphs: { snoozed: 'zz', settled: '✓', agent: { opencode: 'oc', copilot: 'cp' } },
 };
 
 /** The status dot glyph and its style. */

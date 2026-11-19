@@ -73,11 +73,11 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('worktree-delete', 'git', ['d', 'delete', 'backspace'], 'delete', 'Delete the worktree (typed confirm; deletes files)', { footer: true }),
 
     // Sessions column.
-    b('session-new', 'sessions', ['n'], 'new', 'New OpenCode session in the selected checkout', { footer: true }),
+    b('session-new', 'sessions', ['n'], 'new', 'New session in the selected checkout (with two agents: a menu, 1 OpenCode, 2 Copilot)', { footer: true }),
     b('session-rename', 'sessions', ['r'], 'rename', 'Rename the session', { footer: true }),
     b('session-archive', 'sessions', ['a'], 'archive', 'Archive the session (unarchive when it is archived)', { footer: true }),
     b('session-unarchive', 'sessions', ['u'], 'unarchive', 'Unarchive the session'),
-    b('session-delete', 'sessions', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode (confirm)', { footer: true }),
+    b('session-delete', 'sessions', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode (confirm); Copilot: delete it in Copilot', { footer: true }),
     b('session-show-archived', 'sessions', ['A'], 'archived', 'Show or hide archived sessions', { footer: true }),
     b('session-handoff', 'sessions', ['O'], 'full window', 'Open the session in the full window (suspends this program)'),
     b('session-snooze', 'sessions', ['s'], 'snooze', 'Snooze the session (an inbox mark, shown as zz)'),
@@ -106,10 +106,10 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('session-settle', 'inbox', ['e'], 'settle', 'Settle ("done for now") or unsettle; new activity brings it back', { footer: true }),
     b('session-unmark', 'inbox', ['u'], 'reopen', 'Back to Open: remove the snooze or the settle mark', { footer: true }),
     b('inbox-show-settled', 'inbox', ['E'], 'settled', 'Show or hide the Settled section'),
-    b('session-new', 'inbox', ['n'], 'new', 'New session in the folder of the selected session'),
+    b('session-new', 'inbox', ['n'], 'new', 'New session of the same agent in the folder of the selected session'),
     b('session-rename', 'inbox', ['r'], 'rename', 'Rename the session (inbox)'),
     b('session-archive', 'inbox', ['a'], 'archive', 'Archive the session; it leaves the inbox'),
-    b('session-delete', 'inbox', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode and its inbox marks (confirm)'),
+    b('session-delete', 'inbox', ['d', 'delete', 'backspace'], 'delete', 'Delete the session in OpenCode and its inbox marks (confirm); not for Copilot'),
     b('session-handoff', 'inbox', ['O'], 'full window', 'Open the session in the full window (inbox)'),
     b('inbox-goto', 'inbox', ['g'], 'go to', 'Show the session in the projects view'),
     b('next-attention', 'inbox', [']'], 'next', 'Next session that wants attention (needs input, then unseen or back), wrapping', { footer: true }),
@@ -120,10 +120,10 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('refresh', 'global', ['R'], 'refresh', 'Refresh Git status, worktrees, pull requests and sessions'),
     b('switch-view', 'global', ['v'], 'view', 'Switch between the projects view and the inbox view (saved)', { footer: true }),
     b('help', 'global', ['?'], 'help', 'Show this help', { footer: true }),
-    b('quit', 'global', ['q', 'ctrl+c'], 'quit', 'Quit (asks first; sessions keep running in OpenCode)', { footer: true }),
+    b('quit', 'global', ['q', 'ctrl+c'], 'quit', 'Quit (asks first; OpenCode sessions keep running in the service, a Copilot pane stops)', { footer: true }),
 
     // The pane: everything else goes to OpenCode.
-    b('pane-leave', 'pane', [leaveKey], 'leave pane', 'Leave the pane (every other key goes to OpenCode); a click on a column also leaves', { footer: true }),
+    b('pane-leave', 'pane', [leaveKey], 'leave pane', 'Leave the pane (every other key goes to the program in it); a click on a column also leaves', { footer: true }),
 
     // Add-project prompt.
     b('browser-complete', 'browser', ['tab'], 'complete', 'Complete the typed name', { footer: true }),
@@ -179,7 +179,7 @@ export const CONTEXT_TITLES: Record<Context, string> = {
   git: 'Git column',
   sessions: 'Sessions column',
   columns: 'Every column of the projects view',
-  pane: 'Pane (OpenCode)',
+  pane: 'Pane (OpenCode or Copilot)',
   browser: 'Add project prompt',
 };
 

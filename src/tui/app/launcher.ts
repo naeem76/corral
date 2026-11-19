@@ -1,4 +1,5 @@
-// Decides how to start the OpenCode TUI, and whether it is safe to start it at all.
+// Decides how to start an agent program (the OpenCode TUI or the Copilot CLI), and whether it
+// is safe to start it at all.
 //
 // Verified hazard: when the `opencode` CLI version differs from the running service version,
 // starting the OpenCode TUI makes the service stop or restart, which ends the user's running
@@ -7,7 +8,9 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { AgentId } from '../../types.ts';
 import { describeResolveFailure, type ResolveResult, type Runner } from '../../core/exe.ts';
+import type { CopilotLaunch } from '../../core/copilot-launch.ts';
 
 export type LaunchPlan =
   | {
@@ -20,6 +23,10 @@ export type LaunchPlan =
       runnableHere: boolean;
       /** Set when the CLI version could not be compared with the service. */
       warning?: string;
+      /** Arguments that go before the agent's own arguments (the Copilot loader script). */
+      prefixArgs?: string[];
+      /** Environment for the program (Copilot: `COPILOT_HOME` when this program uses another home). */
+      env?: Record<string, string>;
     }
   | { ok: false; message: string };
 
@@ -31,6 +38,10 @@ export interface LauncherDeps {
   /** Reads package.json next to a script shim. Default: fs.readFile. */
   readFile?: (p: string) => Promise<string>;
   platform?: NodeJS.Platform;
+  /** How to start `copilot`. Without it, Copilot sessions cannot start. */
+  copilot?: () => CopilotLaunch;
+  /** Environment for a Copilot program. */
+  copilotEnv?: () => Record<string, string>;
 }
 
 /**
@@ -51,7 +62,18 @@ export async function shimVersion(shim: string, read: (p: string) => Promise<str
 }
 
 export interface Launcher {
-  prepare(): Promise<LaunchPlan>;
+  /** How to start the program of `agent` (default 'opencode'). */
+  prepare(agent?: AgentId): Promise<LaunchPlan>;
+}
+
+/** The plan for a Copilot session. No version check: Copilot does not talk to the service. */
+export function copilotPlan(launch: CopilotLaunch | undefined, env: Record<string, string> = {}): LaunchPlan {
+  if (!launch) return { ok: false, message: 'Copilot: no launcher configured.' };
+  if (!launch.ok) return { ok: false, message: `Cannot start Copilot: ${launch.reason}.` };
+  const plan: LaunchPlan = { ok: true, command: launch.command, shimNote: null, runnableHere: true };
+  if (launch.args.length) plan.prefixArgs = [...launch.args];
+  if (Object.keys(env).length) plan.env = { ...env };
+  return plan;
 }
 
 /** "opencode v2.3.2" / "2.3.2" -> "2.3.2". */
@@ -63,7 +85,8 @@ export function parseVersion(text: string): string | null {
 export function createLauncher(deps: LauncherDeps): Launcher {
   let cliVersion: string | null = null;
   return {
-    async prepare(): Promise<LaunchPlan> {
+    async prepare(agent: AgentId = 'opencode'): Promise<LaunchPlan> {
+      if (agent === 'copilot') return copilotPlan(deps.copilot?.(), deps.copilotEnv?.());
       const r = deps.resolve('opencode');
       const command = r.ok ? r.path : 'opencode';
       const shimNote = !r.ok && r.reason === 'shim' ? describeResolveFailure('opencode', r) : null;

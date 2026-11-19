@@ -1,16 +1,26 @@
-// Live panes: one OpenCode TUI per session, each a PTY in the service plus an emulator here.
+// Live panes: one agent program per session (the OpenCode TUI or the Copilot CLI), each a PTY
+// in the OpenCode service plus an emulator here. The service PTY runs any program, so a Copilot
+// session uses it the same way.
 // Independent of any view: the projects view and a later inbox view both show panes from it.
 //
 // At most `max` panes stay alive (LRU). A pane whose session is working or needs input is
-// evicted only when every other candidate is busy too.
+// evicted only when every other candidate is busy too, and a busy Copilot pane never.
 
-import type { Emulator, PtyHandle, PtySpawn, SessionStatus } from '../../types.ts';
+import type { AgentId, Emulator, PtyHandle, PtySpawn, SessionStatus } from '../../types.ts';
+import { AGENT_NAMES } from '../../types.ts';
 import { OpenCodeError } from '../../core/opencode.ts';
 import type { Launcher } from './launcher.ts';
+import { copilotSessionArgs } from '../../core/copilot-launch.ts';
 import { ptyTitle } from './stale.ts';
+
+/** Arguments that resume (or, with a new id, start) a session of the agent. */
+export function sessionArgs(agent: AgentId, id: string): string[] {
+  return agent === 'copilot' ? copilotSessionArgs(id) : ['--session', id];
+}
 
 export interface Pane {
   readonly sessionId: string;
+  readonly agent: AgentId;
   readonly directory: string;
   readonly emulator: Emulator;
   readonly pty: PtyHandle;
@@ -87,7 +97,7 @@ export class PaneManager {
     if (p) p.lastUsed = this.#deps.now();
   }
 
-  open(sessionId: string, directory: string, cols: number, rows: number): Promise<OpenResult> {
+  open(sessionId: string, directory: string, cols: number, rows: number, agent: AgentId = 'opencode'): Promise<OpenResult> {
     const live = this.#panes.get(sessionId);
     if (live) {
       live.lastUsed = this.#deps.now();
@@ -95,26 +105,28 @@ export class PaneManager {
     }
     const pending = this.#opening.get(sessionId);
     if (pending) return pending;
-    const p = this.#open(sessionId, directory, Math.max(1, cols), Math.max(1, rows)).finally(() => this.#opening.delete(sessionId));
+    const p = this.#open(sessionId, directory, Math.max(1, cols), Math.max(1, rows), agent).finally(() => this.#opening.delete(sessionId));
     this.#opening.set(sessionId, p);
     return p;
   }
 
-  async #open(sessionId: string, directory: string, cols: number, rows: number): Promise<OpenResult> {
-    const plan = await this.#deps.launcher.prepare();
+  async #open(sessionId: string, directory: string, cols: number, rows: number, agent: AgentId): Promise<OpenResult> {
+    const plan = await this.#deps.launcher.prepare(agent);
     if (!plan.ok) return { ok: false, kind: 'blocked', message: plan.message };
     if (this.#closed) return { ok: false, kind: 'error', message: 'closing' };
     const emulator = this.#deps.createEmulator(cols, rows);
     let pty: PtyHandle;
     try {
-      pty = await this.#deps.openPty({
+      const spawn: PtySpawn = {
         command: plan.command,
-        args: ['--session', sessionId],
+        args: [...(plan.prefixArgs ?? []), ...sessionArgs(agent, sessionId)],
         cwd: directory,
         cols,
         rows,
         title: ptyTitle(this.#deps.pid, sessionId),
-      });
+      };
+      if (plan.env) spawn.env = plan.env;
+      pty = await this.#deps.openPty(spawn);
     } catch (err) {
       const e = err as OpenCodeError;
       const msg = err instanceof Error ? err.message : String(err);
@@ -128,7 +140,7 @@ export class PaneManager {
       return { ok: false, kind: 'error', message: 'closing' };
     }
     const now = this.#deps.now();
-    const pane: Pane = { sessionId, directory, emulator, pty, cols, rows, lastUsed: now, startedAt: now, gotOutput: false };
+    const pane: Pane = { sessionId, agent, directory, emulator, pty, cols, rows, lastUsed: now, startedAt: now, gotOutput: false };
     this.#exitReasons.delete(sessionId);
     pty.onData = (data) => {
       pane.gotOutput = true;
@@ -143,10 +155,10 @@ export class PaneManager {
       let reason =
         info.reason === 'disconnected'
           ? 'The connection to the OpenCode service was lost.'
-          : `OpenCode exited${info.exitCode !== null ? ` with code ${info.exitCode}` : ''}.`;
+          : `${AGENT_NAMES[agent]} exited${info.exitCode !== null ? ` with code ${info.exitCode}` : ''}.`;
       const quick = this.#deps.now() - pane.startedAt < (this.#deps.quickExitMs ?? 3000) && !pane.gotOutput;
       if (quick && plan.shimNote) reason += ' ' + plan.shimNote;
-      else if (quick && info.reason === 'exited') reason += ' It exited at once: check that the service can run opencode (node src/main.ts doctor).';
+      else if (quick && info.reason === 'exited') reason += ` It exited at once: check that the service can run ${agent === 'copilot' ? 'copilot' : 'opencode'} (node src/main.ts doctor).`;
       this.#exitReasons.set(sessionId, reason);
       // The service keeps an exited PTY until it is deleted.
       void pty.close();
@@ -168,7 +180,10 @@ export class PaneManager {
         return s === 'working' || s === 'needs-input';
       };
       const idle = others.filter((p) => !busy(p));
-      const pool = idle.length > 0 ? idle : others;
+      // Closing a Copilot pane ends its program (an OpenCode TUI is only a client), so a busy
+      // Copilot pane is never closed; the limit waits until it is idle.
+      const pool = idle.length > 0 ? idle : others.filter((p) => p.agent !== 'copilot');
+      if (pool.length === 0) return;
       pool.sort((a, b) => a.lastUsed - b.lastUsed);
       const victim = pool[0] as Pane;
       this.#panes.delete(victim.sessionId);

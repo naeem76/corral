@@ -30,6 +30,11 @@ The important results:
 | Directory path forms | Not an error. It shows which forms of a folder path OpenCode accepts. |
 | git --version | `WARN` below 2.31: update Git for Windows. |
 | az on PATH | Optional. On Windows `az` is `az.cmd`. The program then starts the Python that comes with the Azure CLI directly. A `WARN` means pull requests stay off. |
+| copilot program | Optional. It tells how the program starts Copilot: `a real program on PATH` (WinGet), `the native program behind the npm shim`, or `node + npm-loader.js behind the npm shim`. A `WARN` means Copilot sessions can be listed but not started. |
+| Copilot home | Optional. `WARN ... no session-state folder`: Copilot has no session on this machine yet, or it uses another folder (set `COPILOT_HOME`). |
+
+A machine without OpenCode is supported: the OpenCode checks then show `FAIL`, and the program
+still works with Copilot sessions.
 
 `doctor` creates a temporary folder, a test session and a test PTY. It deletes them at the end.
 
@@ -52,6 +57,21 @@ node src\main.ts doctor --opencode-pty --only service,pty
 
 This starts the real OpenCode TUI in a hidden terminal for a few seconds. It sends no keys and
 no prompt. It runs only when the service and the CLI have the same version. Send the output back.
+
+## 4. Check the Copilot session files
+
+```
+node src\main.ts doctor --copilot --only copilot
+```
+
+This reads the 3 newest Copilot sessions in your Copilot home (`~\.copilot` or `COPILOT_HOME`).
+It prints only the key names of `workspace.yaml` (with values only for the client name and
+the times) and how many events of each type are at the end of `events.jsonl`. It prints no
+title, no prompt, no message text, no path and no tool argument. Start one Copilot session
+first and ask it something small, so that there is something to read. Send the output back.
+
+The program reads Copilot's files only. It never writes them and never opens
+`session-store.db`.
 
 ## A short command: `ne`
 

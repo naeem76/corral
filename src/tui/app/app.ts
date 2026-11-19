@@ -6,12 +6,16 @@
 // session `selectedSession()` returns, and the pane follows it.
 
 import path from 'node:path';
-import type { Checkout, Emulator, InputEvent, Project, PtyHandle, PtySpawn, PullRequest, SessionRow, SessionStatus } from '../../types.ts';
+import type {
+  AgentId, Checkout, Emulator, InputEvent, Project, PtyHandle, PtySpawn, PullRequest, SessionCapabilities, SessionRow,
+  SessionSource, SessionStatus,
+} from '../../types.ts';
+import { AGENT_NAMES } from '../../types.ts';
 import type { Git, CheckoutStatus } from '../../core/git.ts';
 import type { OpenCodeApi } from '../../core/opencode.ts';
 import type { PrProvider } from '../../core/pr.ts';
 import type { SessionMeta, UiState } from '../../core/store.ts';
-import type { SessionInfo } from '../../core/sessions.ts';
+import type { AgentInfo } from '../../core/session-hub.ts';
 import { pathKey, samePath } from '../../core/paths.ts';
 import { createFrame, renderDiff, type Frame, type Rect } from '../frame.ts';
 import { matches } from '../keys.ts';
@@ -37,7 +41,8 @@ import type { Launcher } from './launcher.ts';
 import { InboxView } from './inbox-view.ts';
 import { computeInboxLayout, computeLayout, type AppLayout } from './layout.ts';
 import type { Logger } from './log.ts';
-import { PaneManager } from './pane-manager.ts';
+import { PaneManager, sessionArgs } from './pane-manager.ts';
+import { blockedAction, pickAgent, quitText, startableAgents } from './agents.ts';
 import { cleanupStalePtys } from './stale.ts';
 import { renderApp } from './view.ts';
 import { renderInbox } from './view-inbox.ts';
@@ -76,36 +81,38 @@ export interface AppStore {
   flush(): Promise<void>;
 }
 
-export interface AppTracker {
-  readonly connected: boolean;
-  onChange(cb: () => void): () => void;
-  watch(directories: readonly string[]): Promise<void>;
-  rows(directory: string): SessionRow[];
-  status(id: string): SessionStatus;
-  get(id: string): SessionInfo | undefined;
-  markSeen(id: string): void;
-  create(directory: string, title?: string): Promise<string>;
-  rename(id: string, title: string): Promise<void>;
-  archive(id: string): Promise<void>;
-  unarchive(id: string): Promise<void>;
-  remove(id: string): Promise<void>;
-  refresh(directories?: readonly string[]): Promise<void>;
-  dispose(): void;
+/** The sessions of all agents (`SessionHub` in core/session-hub.ts). */
+export interface AppSessions extends SessionSource {
+  source(agent: AgentId): SessionSource | undefined;
+  agents(): AgentInfo[];
+  agentsWithRows(): Set<AgentId>;
+  agentOf(id: string): AgentId | undefined;
+  capabilitiesOf(id: string): SessionCapabilities;
+  createWith(agent: AgentId, directory: string, title?: string): Promise<string>;
+  defaultAgent: AgentId | undefined;
+  /** The program of the session started / ended (a pane or the full window). */
+  opened(id: string): void;
+  closed(id: string): Promise<void>;
 }
 
 export interface AppDeps {
   terminal: TerminalLike;
   store: AppStore;
   git: Git;
-  tracker: AppTracker;
+  hub: AppSessions;
   client: OpenCodeApi;
+  /**
+   * True when the agent's program is on this machine. OpenCode: the service can be started
+   * (default true). Copilot: `copilot` resolves (default: the Copilot source says so).
+   */
+  agentInstalled?: (agent: AgentId) => boolean;
   prs: PrProvider;
   launcher: Launcher;
   openPty: (spawn: PtySpawn) => Promise<PtyHandle>;
   createEmulator: (cols: number, rows: number) => Emulator;
   /** Find or start the service. Rejects with a user-facing message. */
   ensureService: () => Promise<void>;
-  /** Runs `opencode --session` with inherited stdio for the full-window hand-off. */
+  /** Runs the agent program with inherited stdio for the full-window hand-off. */
   runChild: ChildRunner;
   openUrl: (url: string) => Promise<void>;
   fs: BrowserFs;
@@ -201,7 +208,8 @@ export class App {
   /** Checkout whose sessions the Sessions column shows. */
   checkoutPath: string | null = null;
 
-  service: 'starting' | 'ok' | 'down' = 'starting';
+  /** OpenCode service: 'absent' when it is not found and `opencode` is not installed (no error). */
+  service: 'starting' | 'ok' | 'down' | 'absent' = 'starting';
   serviceError: string | null = null;
   /** Per-session note for the information panel (a blocked start, an error). */
   notes = new Map<string, string>();
@@ -252,10 +260,11 @@ export class App {
       launcher: deps.launcher,
       pid: deps.pid,
       now: deps.now,
-      statusOf: (id) => deps.tracker.status(id),
+      statusOf: (id) => deps.hub.status(id),
       onChange: () => this.invalidate(),
       onExit: (id, reason) => {
         this.notes.set(id, this.deps.redact(reason));
+        this.deps.hub.closed(id).catch((err) => this.log(`after exit: ${errorText(err)}`));
         if (this.focus === 'pane' && this.selectedSession()?.id === id) this.focus = this.listFocus();
         this.updateWatch();
       },
@@ -267,7 +276,7 @@ export class App {
   // ---- lifecycle ---------------------------------------------------------
 
   start(): void {
-    const { terminal, store, tracker } = this.deps;
+    const { terminal, store, hub } = this.deps;
     if (store.ui.view !== 'projects' && store.ui.view !== 'inbox') store.setUi({ view: 'projects' });
     this.#unsubs.push(
       terminal.onInput((events) => {
@@ -293,7 +302,7 @@ export class App {
         this.updateWatch();
         this.invalidate();
       }),
-      tracker.onChange(() => this.onTrackerChange()),
+      hub.onChange(() => this.onTrackerChange()),
     );
     // Restore the project selection, then load what it needs.
     this.lists.projects = reconcileList(this.lists.projects, this.projectItems(), this.listRows('projects'));
@@ -323,7 +332,7 @@ export class App {
       const m = this.message;
       const expired = m ? this.deps.now() - m.at > (m.error ? 12_000 : 5_000) : false;
       const wake = this.inbox.nextWake();
-      const state = `${this.deps.tracker.connected}|${this.service}|${expired}|${Math.floor(this.deps.now() / 60_000)}|${wake}`;
+      const state = `${this.opencodeConnected()}|${this.deps.hub.available}|${this.service}|${expired}|${Math.floor(this.deps.now() / 60_000)}|${wake}`;
       if (expired) this.message = null;
       if (state !== this.#tickState || expired) {
         this.#tickState = state;
@@ -337,18 +346,51 @@ export class App {
   #needing: Promise<boolean> | null = null;
   #lastClick: { col: Focus; key: string | null; at: number } | null = null;
 
-  async connectService(): Promise<void> {
+  /**
+   * Find or start the OpenCode service. A machine without `opencode` (Copilot only) gets the
+   * calm state 'absent' and no error; `quiet` keeps the error out of the footer (a Copilot
+   * action that only hoped for the pane).
+   */
+  async connectService(quiet = false): Promise<void> {
+    if (!this.deps.hub.source('opencode')) {
+      this.service = 'absent';
+      this.invalidate();
+      return;
+    }
     try {
       await this.deps.ensureService();
       this.service = 'ok';
       this.serviceError = null;
       void this.cleanupStale();
     } catch (err) {
-      this.service = 'down';
       this.serviceError = this.deps.redact(errorText(err));
-      this.error(`OpenCode service not available: ${this.serviceError}. Run "node src/main.ts doctor" for details.`);
+      if (!this.agentInstalled('opencode')) {
+        this.service = 'absent';
+        this.log(`OpenCode not installed: ${this.serviceError}`);
+      } else {
+        this.service = 'down';
+        if (!quiet) this.error(`OpenCode service not available: ${this.serviceError}. Run "node src/main.ts doctor" for details.`);
+        else this.log(`OpenCode service not available: ${this.serviceError}`);
+      }
     }
     this.invalidate();
+  }
+
+  /** The OpenCode event stream is connected. */
+  opencodeConnected(): boolean {
+    return this.deps.hub.source('opencode')?.available === true;
+  }
+
+  /** The OpenCode service holds a PTY for the pane now. */
+  paneAvailable(): boolean {
+    return this.service === 'ok' && this.opencodeConnected();
+  }
+
+  agentInstalled(agent: AgentId): boolean {
+    if (this.deps.agentInstalled) return this.deps.agentInstalled(agent);
+    const src = this.deps.hub.source(agent) as (SessionSource & { programFound?: boolean }) | undefined;
+    if (!src) return false;
+    return agent === 'opencode' ? true : (src.programFound ?? src.available);
   }
 
   /**
@@ -356,11 +398,11 @@ export class App {
    * restarted on another port), find it or start it again. Background reconnects never start
    * it, so a service that the user stopped on purpose stays stopped until the user acts.
    */
-  async needService(): Promise<boolean> {
-    if (this.service === 'ok' && this.deps.tracker.connected) return true;
+  async needService(quiet = false): Promise<boolean> {
+    if (this.paneAvailable()) return true;
     this.#needing ??= (async () => {
       try {
-        await this.connectService();
+        await this.connectService(quiet);
         if (this.service !== 'ok') return false;
         // The service can be back with a new URL and password.
         await this.deps.client.connection(true).catch(() => {});
@@ -423,7 +465,7 @@ export class App {
     await this.panes.closeAll(1500);
     this.deps.store.setUi({ ptyDirs: [] });
     try {
-      this.deps.tracker.dispose();
+      this.deps.hub.dispose();
     } catch {}
     await Promise.race([this.deps.store.flush().catch((e) => this.log(`store flush: ${errorText(e)}`)), sleep(1000)]);
     this.deps.terminal.close();
@@ -534,7 +576,7 @@ export class App {
 
   sessionRows(): SessionRow[] {
     if (!this.checkoutPath) return [];
-    const rows = this.deps.tracker.rows(this.checkoutPath);
+    const rows = this.deps.hub.rows(this.checkoutPath);
     return this.showArchived ? rows : rows.filter((r) => !r.archived);
   }
 
@@ -559,7 +601,7 @@ export class App {
     return this.view === 'inbox' ? 'inbox' : 'sessions';
   }
 
-  /** Directories of a project the tracker can know: the root and the loaded checkouts. */
+  /** Directories of a project the sessions can be in: the root and the loaded checkouts. */
   projectDirs(p: Project): string[] {
     const dirs = [p.path];
     for (const c of this.checkouts.get(p.id)?.list ?? []) if (!samePath(c.path, p.path, this.deps.platform)) dirs.push(c.path);
@@ -567,22 +609,22 @@ export class App {
   }
 
   statusOfDir(dir: string): SessionStatus | null {
-    return worstStatus(this.deps.tracker.rows(dir).filter((r) => !r.archived).map((r) => r.status));
+    return worstStatus(this.deps.hub.rows(dir).filter((r) => !r.archived).map((r) => r.status));
   }
 
   statusOfProject(p: Project): SessionStatus | null {
     const all: SessionStatus[] = [];
-    for (const d of this.projectDirs(p)) for (const r of this.deps.tracker.rows(d)) if (!r.archived) all.push(r.status);
+    for (const d of this.projectDirs(p)) for (const r of this.deps.hub.rows(d)) if (!r.archived) all.push(r.status);
     return worstStatus(all);
   }
 
-  /** Every non-archived session the tracker knows, in attention order. */
+  /** Every non-archived session the hub knows, in attention order. */
   attentionList(): Array<{ project: Project; dir: string; row: SessionRow }> {
     const out: Array<{ project: Project; dir: string; row: SessionRow }> = [];
     const seen = new Set<string>();
     for (const p of this.deps.store.projects) {
       for (const d of this.projectDirs(p)) {
-        for (const row of this.deps.tracker.rows(d)) {
+        for (const row of this.deps.hub.rows(d)) {
           if (row.archived || seen.has(row.id)) continue;
           seen.add(row.id);
           out.push({ project: p, dir: d, row });
@@ -608,7 +650,7 @@ export class App {
     const key = [...dirs.keys()].sort().join('\0');
     if (key === this.#watchKey) return;
     this.#watchKey = key;
-    this.deps.tracker.watch([...dirs.values()]).catch((err) => this.log(`watch: ${errorText(err)}`));
+    this.deps.hub.watch([...dirs.values()]).catch((err) => this.log(`watch: ${errorText(err)}`));
   }
 
   // ---- background loads --------------------------------------------------
@@ -719,7 +761,7 @@ export class App {
     if (this.view === 'inbox') this.inbox.reconcile();
     // A session shown in the focused pane that turns unseen is seen at once.
     const s = this.selectedSession();
-    if (this.focus === 'pane' && s && s.status === 'unseen') this.deps.tracker.markSeen(s.id);
+    if (this.focus === 'pane' && s && s.status === 'unseen') this.deps.hub.markSeen(s.id);
     this.invalidate();
   }
 
@@ -968,7 +1010,7 @@ export class App {
     if (!pane) return;
     this.focus = 'pane';
     this.panes.touch(s.id);
-    this.deps.tracker.markSeen(s.id);
+    this.deps.hub.markSeen(s.id);
     this.inbox.opened(s.id);
     const seq = encodeFocusForPty(true, pane.emulator.modes);
     if (seq) this.panes.write(s.id, seq);
@@ -1168,7 +1210,7 @@ export class App {
           kind: 'confirm',
           state: createConfirm({
             title: 'Quit',
-            message: 'Leave nebula-enterprise? Sessions keep running in the OpenCode service.',
+            message: quitText(this),
             yesLabel: 'Quit',
             noLabel: 'Stay',
             choice: 'yes',
@@ -1313,9 +1355,16 @@ export class App {
       if (this.prsAvailable) void this.loadPrs(p);
     }
     this.flash('Refreshing…');
-    void this.needService()
-      .then((up) => (up ? this.deps.tracker.refresh() : undefined))
-      .catch((err) => this.log(`refresh: ${errorText(err)}`));
+    // Copilot needs no service: read its files at once. OpenCode: find or start the service
+    // first (a machine without opencode gets no error from it).
+    const opencode = this.deps.hub.source('opencode');
+    const copilot = this.deps.hub.source('copilot');
+    if (copilot) void copilot.refresh().catch((err) => this.log(`refresh copilot: ${errorText(err)}`));
+    if (opencode && (this.agentInstalled('opencode') || this.service === 'ok')) {
+      void this.needService()
+        .then((up) => (up ? opencode.refresh() : undefined))
+        .catch((err) => this.log(`refresh: ${errorText(err)}`));
+    }
   }
 
   openBrowser(): void {
@@ -1465,15 +1514,28 @@ export class App {
     }
   }
 
-  async newSession(dir: string | null = this.checkoutPath): Promise<void> {
+  /**
+   * New session in `dir`. Without an agent, `pickAgent` asks (a menu when two agents can start
+   * one). A new Copilot session is opened at once: it exists only once the program runs.
+   */
+  async newSession(dir: string | null = this.checkoutPath, agent?: AgentId): Promise<void> {
     if (!dir) {
       this.flash('Select a project first.');
       return;
     }
-    if (!(await this.needService())) return;
+    if (!agent) {
+      pickAgent(this, (a) => void this.newSession(dir, a));
+      return;
+    }
+    if (!startableAgents(this).includes(agent)) {
+      const plan = agent === 'copilot' ? await this.deps.launcher.prepare('copilot') : null;
+      this.error(plan && !plan.ok ? plan.message : `${AGENT_NAMES[agent]} cannot start a session on this machine.`);
+      return;
+    }
+    if (agent === 'opencode' && !(await this.needService())) return;
     this.flash('Creating a session…');
     try {
-      const id = await this.deps.tracker.create(dir);
+      const id = await this.deps.hub.createWith(agent, dir);
       if (this.view === 'inbox') {
         this.focus = 'inbox';
         this.inbox.changed();
@@ -1519,13 +1581,23 @@ export class App {
       return;
     }
     if (this.panes.isOpening(s.id)) return;
-    if (!(await this.needService())) return;
+    if (s.agent === 'copilot') {
+      // The pane needs a PTY of the OpenCode service. Try it only where opencode is installed,
+      // and without an error: the full window is a good fallback.
+      if (!this.paneAvailable() && this.agentInstalled('opencode')) await this.needService(true);
+      if (!this.paneAvailable()) {
+        const why = this.service === 'absent' ? 'there is no OpenCode service on this machine' : 'the OpenCode service is not available';
+        await this.runHandoff(s, `The pane needs the OpenCode service, and ${why}, so Copilot ran in the full window.`);
+        return;
+      }
+    } else if (!(await this.needService())) return;
     if (this.panes.has(s.id) || this.panes.isOpening(s.id)) return;
     const { cols, rows } = this.paneSize();
     this.notes.delete(s.id);
-    this.flash('Starting OpenCode…');
-    const r = await this.panes.open(s.id, s.directory, cols, rows);
+    this.flash(`Starting ${AGENT_NAMES[s.agent]}…`);
+    const r = await this.panes.open(s.id, s.directory, cols, rows, s.agent);
     if (r.ok) {
+      this.deps.hub.opened(s.id);
       this.message = null;
       if (r.warning) this.error(r.warning);
       this.recordPtyDirs();
@@ -1543,35 +1615,50 @@ export class App {
     this.error(r.message);
   }
 
-  async runHandoff(s: SessionRow): Promise<void> {
-    const plan = await this.deps.launcher.prepare();
+  /** Give the whole terminal to the agent program of the session. `why`: shown afterwards. */
+  async runHandoff(s: SessionRow, why?: string): Promise<void> {
+    if (s.agent === 'copilot' && this.panes.has(s.id)) {
+      // Two Copilot processes on one session would both write its files.
+      this.flash('This Copilot session runs in the pane; open it there (Enter).');
+      return;
+    }
+    const plan = await this.deps.launcher.prepare(s.agent);
     if (!plan.ok) {
       this.notes.set(s.id, this.deps.redact(plan.message));
       this.error(plan.message);
       return;
     }
     if (!plan.runnableHere) {
-      const why = plan.shimNote ?? 'opencode: not found on PATH';
-      this.error(`Cannot open the full window: ${why}`);
+      const reason = plan.shimNote ?? `${s.agent}: not found on PATH`;
+      this.error(`Cannot open the full window: ${reason}`);
       return;
     }
     this.handingOff = true;
+    this.deps.hub.opened(s.id);
     let result: { code: number | null; error?: string };
     try {
-      result = await handoff(this.deps.terminal, this.deps.runChild, plan.command, ['--session', s.id], s.directory);
+      const args = [...(plan.prefixArgs ?? []), ...sessionArgs(s.agent, s.id)];
+      result = await handoff(this.deps.terminal, this.deps.runChild, plan.command, args, s.directory, plan.env);
     } finally {
       this.handingOff = false;
       this.#prev = null;
     }
-    if (result.error) this.error(`opencode: ${result.error}`);
-    else this.flash(`OpenCode ended (exit code ${result.code ?? '?'}).`);
-    void this.deps.tracker.refresh().catch(() => {});
+    const name = AGENT_NAMES[s.agent];
+    if (result.error) this.error(`${s.agent}: ${result.error}`);
+    else this.flash(`${name} ended (exit code ${result.code ?? '?'}).${why ? ' ' + why : ''}`);
+    // A new Copilot session has its folder now.
+    void this.deps.hub.closed(s.id).catch(() => {});
     this.invalidate();
   }
 
   renameSession(): void {
     const s = this.selectedSession();
     if (!s) return;
+    const blocked = blockedAction(this, s, 'rename');
+    if (blocked) {
+      this.flash(blocked);
+      return;
+    }
     this.modal = {
       kind: 'prompt',
       title: 'Rename session',
@@ -1580,7 +1667,7 @@ export class App {
       submit: (v) => {
         const t = v.trim();
         if (!t) return;
-        this.deps.tracker.rename(s.id, t).catch((err) => this.error(`Cannot rename: ${errorText(err)}`));
+        this.deps.hub.rename(s.id, t).catch((err) => this.error(`Cannot rename: ${errorText(err)}`));
       },
     };
   }
@@ -1590,10 +1677,10 @@ export class App {
     if (!s) return;
     try {
       if (s.archived) {
-        await this.deps.tracker.unarchive(s.id);
+        await this.deps.hub.unarchive(s.id);
         this.flash(`Unarchived "${s.title}".`);
       } else if (mode === 'toggle') {
-        await this.deps.tracker.archive(s.id);
+        await this.deps.hub.archive(s.id);
         this.flash(this.view === 'inbox' ? `Archived "${s.title}"; it left the inbox.` : `Archived "${s.title}". A shows archived sessions.`);
       }
       this.sessionListChanged();
@@ -1605,6 +1692,11 @@ export class App {
   deleteSession(): void {
     const s = this.selectedSession();
     if (!s) return;
+    const blocked = blockedAction(this, s, 'remove');
+    if (blocked) {
+      this.flash(blocked);
+      return;
+    }
     this.modal = {
       kind: 'confirm',
       state: createConfirm({
@@ -1617,7 +1709,7 @@ export class App {
         void (async () => {
           await this.panes.close(s.id);
           try {
-            await this.deps.tracker.remove(s.id);
+            await this.deps.hub.remove(s.id);
             this.deps.store.forgetSession(s.id);
             this.notes.delete(s.id);
             this.sessionListChanged();

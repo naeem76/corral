@@ -1,6 +1,6 @@
 // Public surface of src/core.
 
-export { envGet, opencodeStateDirs, pathKey, samePath, serviceFileCandidates, stateDir, trimTrailingSep } from './paths.ts';
+export { copilotHome, envGet, opencodeStateDirs, pathKey, samePath, serviceFileCandidates, stateDir, trimTrailingSep } from './paths.ts';
 export type { Env } from './paths.ts';
 export { defaultIsExecutable, describeResolveFailure, resolveExecutable, run } from './exe.ts';
 export type { ResolveOptions, ResolveResult, RunOptions, RunResult, Runner } from './exe.ts';
@@ -23,3 +23,9 @@ export { activeSnooze, buildInbox, classify, formatSnooze, formatTime, marksToCl
 export type { MarkChange } from './inbox.ts';
 export { parseSnoozePresets, parseSnoozeTime, resolveSnoozePreset, snoozeChoices, snoozeLabel, SNOOZE_TIME_FORMS } from './snooze.ts';
 export type { SnoozeChoice } from './snooze.ts';
+export { CopilotSource, copilotStatus, parseEventLines, parseWorkspaceYaml, readEventsTail, summarizeEvents } from './copilot.ts';
+export type { CopilotEvent, CopilotFs, CopilotSourceOptions, EventSummary } from './copilot.ts';
+export { copilotSessionArgs, resolveCopilotLaunch } from './copilot-launch.ts';
+export type { CopilotLaunch, CopilotLaunchOptions } from './copilot-launch.ts';
+export { SessionHub } from './session-hub.ts';
+export type { AgentInfo, HubEntry, SessionHubOptions } from './session-hub.ts';

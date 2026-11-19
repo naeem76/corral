@@ -9,7 +9,8 @@ import { isWebUrl, openCommand, openUrl } from '../../src/tui/app/open-url.ts';
 import { buildBindings, DEFAULT_LEAVE_KEY, findAction, footerHints, validLeaveKey } from '../../src/tui/app/bindings.ts';
 import { createLogger, makeRedactor } from '../../src/tui/app/log.ts';
 import { ptyOwner, ptyTitle } from '../../src/tui/app/stale.ts';
-import { parseVersion } from '../../src/tui/app/launcher.ts';
+import { copilotPlan, createLauncher, parseVersion } from '../../src/tui/app/launcher.ts';
+import { sessionArgs } from '../../src/tui/app/pane-manager.ts';
 import { relativeTime, tildify } from '../../src/tui/app/format.ts';
 import { handoff } from '../../src/tui/app/handoff.ts';
 
@@ -217,6 +218,36 @@ test('stale: titles and owners', () => {
   assert.equal(ptyOwner('nebula-enterprise:abc:ses_x'), null);
   assert.equal(ptyOwner('other'), null);
   assert.equal(ptyOwner(undefined), null);
+  // Copilot session ids are UUIDs: no colon, so the owner is found the same way.
+  const uuid = '3594e778-86c4-4da7-b393-1259e8bc1057';
+  assert.equal(ptyTitle(12, uuid), `nebula-enterprise:12:${uuid}`);
+  assert.equal(ptyOwner(ptyTitle(4242, uuid)), 4242);
+});
+
+test('launcher: Copilot plans (no version check), args before the session id', async () => {
+  let runs = 0;
+  const base = {
+    resolve: () => ({ ok: true as const, path: '/opt/opencode' }),
+    run: async () => (runs++, { code: 0, stdout: '9.9.9', stderr: '' }),
+    serviceVersion: async () => '2.3.2',
+  };
+  const exe = createLauncher({ ...base, copilot: () => ({ ok: true, kind: 'exe', command: '/opt/copilot', args: [] }) });
+  assert.deepEqual(await exe.prepare('copilot'), { ok: true, command: '/opt/copilot', shimNote: null, runnableHere: true });
+  assert.equal(runs, 0, 'the OpenCode version check is only for OpenCode');
+  const loader = createLauncher({
+    ...base,
+    copilot: () => ({ ok: true, kind: 'loader', command: 'C:\\node\\node.exe', args: ['C:\\npm\\node_modules\\@github\\copilot\\npm-loader.js'] }),
+    copilotEnv: () => ({ COPILOT_HOME: 'D:\\cp' }),
+  });
+  const plan = await loader.prepare('copilot');
+  assert.ok(plan.ok);
+  assert.deepEqual(plan.ok && plan.prefixArgs, ['C:\\npm\\node_modules\\@github\\copilot\\npm-loader.js']);
+  assert.deepEqual(plan.ok && plan.env, { COPILOT_HOME: 'D:\\cp' });
+  const none = createLauncher({ ...base, copilot: () => ({ ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' }) });
+  assert.deepEqual(await none.prepare('copilot'), { ok: false, message: 'Cannot start Copilot: copilot (GitHub Copilot CLI) not found on PATH.' });
+  assert.deepEqual(copilotPlan(undefined), { ok: false, message: 'Copilot: no launcher configured.' });
+  assert.deepEqual(sessionArgs('copilot', 'u-1'), ['--session-id', 'u-1']);
+  assert.deepEqual(sessionArgs('opencode', 'ses_1'), ['--session', 'ses_1']);
 });
 
 test('format and version helpers', () => {

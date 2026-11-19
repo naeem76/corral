@@ -14,6 +14,7 @@ import { SECTION_TITLES, type InboxItem } from './inbox-view.ts';
 import type { App } from './app.ts';
 import type { AppLayout } from './layout.ts';
 import { columnBox, dotAt, drawFooter, drawModalLayer, drawPane, onBg } from './view.ts';
+import { agentTag, emptyInboxText } from './agents.ts';
 
 const th = defaultTheme;
 /** Below this many cells for the title, the project part of a row is dropped. */
@@ -61,9 +62,16 @@ const partsWidth = (parts: Part[]) => parts.reduce((a, p) => a + stringWidth(p.t
  * title gets too short, the parts give way in this order: the branch, the project, then the
  * word "until" of the snooze text. The title is truncated last; the age always stays.
  */
-export function rowParts(e: InboxEntry, width: number, now: number, live: boolean, platform: NodeJS.Platform): { title: string; right: Part[] } {
+export function rowParts(
+  e: InboxEntry,
+  width: number,
+  now: number,
+  live: boolean,
+  platform: NodeJS.Platform,
+  agent = '',
+): { title: string; right: Part[] } {
   const title = clean(e.row.title).trim() || '(untitled)';
-  const age: Part = { text: (live ? '▸ ' : '') + relativeTime(e.row.updated, now), style: th.dim };
+  const age: Part = { text: (live ? '▸ ' : '') + (agent ? agent + ' ' : '') + relativeTime(e.row.updated, now), style: th.dim };
   const max = Math.max(8, Math.floor(width * 0.4));
   const full = placeText(e, platform);
   const name = clean(e.project.name);
@@ -86,13 +94,6 @@ export function rowParts(e: InboxEntry, width: number, now: number, live: boolea
   return { title: truncate(title, Math.max(1, room(right))), right };
 }
 
-function emptyText(app: App): string[] {
-  if (app.service === 'down' && !app.deps.tracker.connected) return ['The OpenCode service is not available.', 'Run "node src/main.ts doctor" for details.'];
-  if (app.deps.store.projects.length === 0) return ['No projects yet.', 'Press v for the projects view, then n to add a project folder.'];
-  if (!app.deps.tracker.connected) return ['Connecting to OpenCode…'];
-  return ['No sessions in your projects.', 'Press v for the projects view, select a folder and press n for a new session.'];
-}
-
 function drawInboxList(f: Frame, app: App, outer: Rect): void {
   const focused = app.focus === 'inbox' && !app.modal;
   const items = app.inbox.items();
@@ -105,7 +106,7 @@ function drawInboxList(f: Frame, app: App, outer: Rect): void {
   if (items.length === 0) {
     f.pushClip(list);
     let y = list.y;
-    for (const t of emptyText(app)) for (const l of wrapText(t, list.w - 2)) f.text(list.x + 1, y++, l, th.dim);
+    for (const t of emptyInboxText(app)) for (const l of wrapText(t, list.w - 2)) f.text(list.x + 1, y++, l, th.dim);
     f.popClip();
     return;
   }
@@ -126,7 +127,7 @@ function drawInboxList(f: Frame, app: App, outer: Rect): void {
       const e = d.entry;
       if (info.selected && focused) fr.put(r.x, r.y, '▌', onBg(th.borderFocusedStyle, bg));
       dotAt(fr, r.x + 1, r.y, e.row.status, bg);
-      const { title, right } = rowParts(e, r.w - 3, now, app.panes.has(e.row.id), platform);
+      const { title, right } = rowParts(e, r.w - 3, now, app.panes.has(e.row.id), platform, agentTag(app, e.row));
       fr.text(r.x + 3, r.y, title, onBg(e.row.title.trim() ? th.text : th.dim, bg));
       let x = r.x + r.w - partsWidth(right);
       for (const p of right) x = fr.text(x, r.y, p.text, onBg(p.style, bg)) + 2;

@@ -16,7 +16,7 @@
 // The full state is read again after every event-stream (re)connect, because events
 // during a disconnect are lost.
 
-import type { SessionRow, SessionStatus } from '../types.ts';
+import type { AgentId, SessionCapabilities, SessionRow, SessionSource, SessionStatus } from '../types.ts';
 import { locationQuery, type OpenCodeApi } from './opencode.ts';
 import { subscribeEvents, type OcEvent, type Subscription } from './events.ts';
 import { pathKey, trimTrailingSep } from './paths.ts';
@@ -90,7 +90,11 @@ interface Pending {
   dir: string | null;
 }
 
-export class SessionTracker {
+const CAPABILITIES: SessionCapabilities = { rename: true, remove: true, archive: 'agent' };
+
+/** The OpenCode `SessionSource`. */
+export class SessionTracker implements SessionSource {
+  readonly agent: AgentId = 'opencode';
   #client: OpenCodeApi;
   #store: SessionMetaStore | undefined;
   #platform: NodeJS.Platform;
@@ -144,6 +148,31 @@ export class SessionTracker {
   /** True while the event stream is connected. */
   get connected(): boolean {
     return this.#connected;
+  }
+
+  /** OpenCode sessions can be used only through the service. */
+  get available(): boolean {
+    return this.#connected;
+  }
+
+  get unavailableReason(): string | null {
+    return this.#connected ? null : 'the OpenCode service is not connected';
+  }
+
+  capabilities(_agent: AgentId = 'opencode'): SessionCapabilities {
+    return CAPABILITIES;
+  }
+
+  /** One row by id (child sessions too). */
+  row(id: string): SessionRow | undefined {
+    const s = this.#sessions.get(id);
+    return s ? this.#row(s) : undefined;
+  }
+
+  /** Start or end of the last execution (`max(time.busy, time.idle)`); 0 when unknown. */
+  activity(id: string): number {
+    const t = this.#sessions.get(id)?.time;
+    return Math.max(t?.busy ?? 0, t?.idle ?? 0);
   }
 
   onChange(cb: () => void): () => void {
@@ -495,6 +524,7 @@ export class SessionTracker {
   #row(s: SessionInfo): SessionRow {
     const row: SessionRow = {
       id: s.id,
+      agent: 'opencode',
       title: s.title ?? '',
       directory: s.location.directory,
       created: s.time.created,

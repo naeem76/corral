@@ -10,7 +10,7 @@
 // - Live checks change only what they create, in a new scratch directory, and clean up.
 // - Plain ASCII layout (no box drawing), so the output survives copy/paste from PowerShell.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +20,9 @@ import { discoverService, OpenCodeClient, OpenCodeError, type OpenCodeApi, type 
 import { subscribeEvents } from './core/events.ts';
 import { openPty, type WsFactory } from './core/pty.ts';
 import { createGit } from './core/git.ts';
-import { samePath, serviceFileCandidates, stateDir, type Env } from './core/paths.ts';
+import { copilotHome, samePath, serviceFileCandidates, stateDir, type Env } from './core/paths.ts';
+import { resolveCopilotLaunch, type CopilotLaunch } from './core/copilot-launch.ts';
+import { nodeCopilotFs, parseWorkspaceYaml, readEventsTail, statusFromSummary, summarizeEvents } from './core/copilot.ts';
 import { createAzurePrProvider, type AzurePrProvider } from './core/pr-azure.ts';
 import { detectColorDepth } from './tui/style.ts';
 
@@ -68,6 +70,8 @@ export interface DoctorDeps {
   fetch: typeof fetch;
   webSocket?: WsFactory;
   azure: () => AzurePrProvider;
+  /** How to start `copilot`. Default: `resolveCopilotLaunch` with `env`, `platform`, `resolve`. */
+  copilot?: () => CopilotLaunch;
   /** The interactive `--keys` check. */
   keys: (deps: DoctorDeps) => Promise<CheckResult[]>;
   now: () => number;
@@ -81,11 +85,12 @@ export interface DoctorFlags {
   fullPaths: boolean;
   keys: boolean;
   opencodePty: boolean;
+  copilot: boolean;
   only: Set<string> | null;
   help: boolean;
 }
 
-export const GROUPS = ['runtime', 'terminal', 'cli', 'service', 'events', 'pty', 'sessions', 'git', 'azure', 'state'] as const;
+export const GROUPS = ['runtime', 'terminal', 'cli', 'service', 'events', 'pty', 'sessions', 'copilot', 'git', 'azure', 'state'] as const;
 
 const TITLES: Record<string, string> = {
   runtime: 'Runtime',
@@ -95,6 +100,7 @@ const TITLES: Record<string, string> = {
   events: 'Events',
   pty: 'PTY',
   sessions: 'Sessions',
+  copilot: 'GitHub Copilot CLI',
   git: 'Git',
   azure: 'Azure DevOps',
   state: 'State',
@@ -117,18 +123,21 @@ Options:
   --full-paths      do not replace the home folder with ~
   --keys            also run the interactive keyboard/mouse/paste check
   --opencode-pty    also start the real OpenCode TUI in a PTY for a few seconds
+  --copilot         also print the structure of the 3 newest Copilot sessions (key
+                    names, event type counts; no prompts, no paths, no message text)
   --only <groups>   run only these groups (comma list): ${GROUPS.join(',')}
   -h, --help        show this text
 `;
 
 export function parseFlags(args: string[]): DoctorFlags | string {
-  const f: DoctorFlags = { json: false, fullPaths: false, keys: false, opencodePty: false, only: null, help: false };
+  const f: DoctorFlags = { json: false, fullPaths: false, keys: false, opencodePty: false, copilot: false, only: null, help: false };
   for (let i = 0; i < args.length; i++) {
     const a = args[i] as string;
     if (a === '--json') f.json = true;
     else if (a === '--full-paths') f.fullPaths = true;
     else if (a === '--keys') f.keys = true;
     else if (a === '--opencode-pty') f.opencodePty = true;
+    else if (a === '--copilot') f.copilot = true;
     else if (a === '-h' || a === '--help') f.help = true;
     else if (a === '--only' || a.startsWith('--only=')) {
       const v = a === '--only' ? args[++i] : a.slice(7);
@@ -909,6 +918,128 @@ async function groupGit(ctx: Ctx): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// A machine with only Copilot
+// ---------------------------------------------------------------------------
+
+const OPENCODE_GROUPS = new Set(['cli', 'service', 'events', 'pty', 'sessions']);
+
+/** OpenCode is not installed at all, and Copilot can start: the program runs in "Copilot only" mode. */
+function copilotOnly(d: DoctorDeps): boolean {
+  const oc = d.resolve('opencode');
+  if (oc.ok || oc.reason !== 'not-found' || d.env.NEBULA_OPENCODE_URL) return false;
+  const launch = (d.copilot ?? (() => resolveCopilotLaunch({ env: d.env, platform: d.platform, arch: d.arch, execPath: d.execPath, resolve: d.resolve, exists: existsSync })))();
+  return launch.ok;
+}
+
+/** On such a machine a missing OpenCode is not a fault: its FAIL lines become WARN. */
+function optionalOpenCode(c: CheckResult): CheckResult {
+  if (c.status !== 'FAIL' || !OPENCODE_GROUPS.has(c.group)) return c;
+  return { ...c, status: 'WARN', detail: `${c.detail} (OpenCode is not installed: Copilot only, sessions open in the full window)` };
+}
+
+// ---------------------------------------------------------------------------
+// GitHub Copilot CLI (optional: never a FAIL)
+// ---------------------------------------------------------------------------
+
+const LAUNCH_TEXT: Record<string, string> = {
+  override: 'NEBULA_COPILOT_BIN',
+  exe: 'a real program on PATH',
+  native: 'the native program behind the npm shim',
+  loader: 'node + npm-loader.js behind the npm shim',
+};
+
+/** workspace.yaml values that are safe to print: no title, no path. */
+const SAFE_KEYS = new Set(['client_name', 'last_client_name', 'created_at', 'updated_at']);
+
+async function groupCopilot(ctx: Ctx): Promise<void> {
+  const { d, r } = ctx;
+  const launch = (d.copilot ?? (() => resolveCopilotLaunch({ env: d.env, platform: d.platform, arch: d.arch, execPath: d.execPath, resolve: d.resolve, exists: existsSync })))();
+  await r.check('copilot program', 3000, () => {
+    if (!launch.ok) return warn(launch.reason, 'optional: install the GitHub Copilot CLI (winget install GitHub.Copilot, or npm i -g @github/copilot)');
+    const via = LAUNCH_TEXT[launch.kind] ?? launch.kind;
+    const cmd = [launch.command, ...launch.args].join(' ');
+    return pass(`${cmd} (${via}${launch.shim ? `: ${launch.shim}` : ''})`);
+  });
+  await r.check('copilot --version', 20_000, async () => {
+    if (!launch.ok) return skip('no copilot program');
+    // No update check: the machine may have no network.
+    const env = { ...d.env, COPILOT_AUTO_UPDATE: 'false' };
+    const v = await d.run(launch.command, [...launch.args, '--version'], { timeoutMs: ms(ctx, 15_000), env });
+    // "GitHub Copilot CLI 1.0.114." -> "1.0.114"
+    const m = /(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*[0-9A-Za-z])?)/.exec(v.stdout + ' ' + v.stderr);
+    if (v.code === 0 && m) return pass(m[1] as string);
+    const why = v.error?.message ?? (v.stderr.trim().split(/\r?\n/).pop() || `exit code ${v.code}`);
+    return warn(`no version: ${why.slice(0, 200)}`, 'run `copilot --version` by hand and send the output');
+  });
+  const home = copilotHome(d.env, d.platform, d.homedir);
+  const state = path[d.platform === 'win32' ? 'win32' : 'posix'].join(home, 'session-state');
+  let names: string[] | null = null;
+  await r.check('Copilot home', 5000, async () => {
+    try {
+      names = (await fsp.readdir(state)).filter((n) => !n.startsWith('.'));
+      return pass(`${home} (session-state readable)`);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return warn(`${home}: no session-state folder`, 'optional: no Copilot session on this machine yet (or set COPILOT_HOME / NEBULA_COPILOT_HOME)');
+      return warn(`${state}: ${errText(err)}`, 'check the permissions of the folder');
+    }
+  });
+  await r.check('Copilot sessions', 3000, () => {
+    if (names === null) return skip('no session-state folder');
+    return pass(`${(names as string[]).length} session(s)`);
+  });
+  if (ctx.flags.copilot) await r.check('Copilot structure (--copilot)', 30_000, () => copilotStructure(state, names));
+}
+
+/**
+ * The structure of the 3 newest sessions, for the first check on Windows: key names of
+ * workspace.yaml (values only for client and time fields), and event type counts from the
+ * tail of events.jsonl. Never a title, a prompt, a path or a tool argument.
+ */
+async function copilotStructure(state: string, names: string[] | null): Promise<Outcome> {
+  if (!names || names.length === 0) return skip('no sessions');
+  const p = path;
+  const stamped = await Promise.all(
+    names.map(async (n) => {
+      const st = await fsp.stat(p.join(state, n, 'workspace.yaml')).catch(() => null);
+      return { n, at: st?.mtimeMs ?? 0 };
+    }),
+  );
+  stamped.sort((a, b) => b.at - a.at);
+  const notes: string[] = [];
+  let i = 0;
+  for (const { n } of stamped.slice(0, 3)) {
+    i++;
+    const dir = p.join(state, n);
+    let yaml: Record<string, string> = {};
+    try {
+      yaml = parseWorkspaceYaml(await fsp.readFile(p.join(dir, 'workspace.yaml'), 'utf8'));
+    } catch (err) {
+      notes.push(`#${i} workspace.yaml: ${(err as NodeJS.ErrnoException).code ?? 'error'}`);
+    }
+    const keys = Object.keys(yaml);
+    const safe = keys.filter((k) => SAFE_KEYS.has(k)).map((k) => `${k}=${yaml[k]}`);
+    notes.push(`#${i} id ${/^[0-9a-f-]{36}$/i.test(n) ? 'is a UUID' : 'is NOT a UUID'}; workspace.yaml keys: ${keys.join(', ') || '(none)'}`);
+    if (safe.length) notes.push(`#${i} ${safe.join('; ')}`);
+    const ev = p.join(dir, 'events.jsonl');
+    const st = await fsp.stat(ev).catch(() => null);
+    if (!st) {
+      notes.push(`#${i} events.jsonl: none`);
+      continue;
+    }
+    const events = await readEventsTail(nodeCopilotFs, ev, st.size);
+    const counts = new Map<string, number>();
+    for (const e of events) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
+    const requests = events.filter((e) => e.type.endsWith('.requested')).length;
+    const withId = events.filter((e) => e.type.endsWith('.requested') && e.requestId).length;
+    const status = statusFromSummary(summarizeEvents(events), { now: Date.now(), changedAt: st.mtimeMs });
+    notes.push(`#${i} events.jsonl ${Math.round(st.size / 1024)} KB; tail: ${[...counts].map(([t, c]) => `${t} x${c}`).join(', ') || '(no events)'}`);
+    notes.push(`#${i} requests with requestId: ${withId}/${requests}; last event: ${events[events.length - 1]?.type ?? '-'}; status here: ${status.status}${status.outcome ? ` (${status.outcome})` : ''}`);
+  }
+  return pass(`${Math.min(3, names.length)} newest of ${names.length} session(s)`, notes);
+}
+
 async function groupAzure(ctx: Ctx): Promise<void> {
   const { d, r } = ctx;
   const az = d.azure();
@@ -1172,6 +1303,7 @@ export async function runDoctor(args: string[], deps: Partial<DoctorDeps> = {}):
     events: groupEvents,
     pty: groupPty,
     sessions: groupSessions,
+    copilot: groupCopilot,
     git: groupGit,
     azure: groupAzure,
     state: groupState,
@@ -1201,7 +1333,7 @@ export async function runDoctor(args: string[], deps: Partial<DoctorDeps> = {}):
   const svc = ctx.service ? await ctx.service : null;
   if (svc && 'info' in svc && svc.info.password) ctx.secrets.add(svc.info.password);
   const tidy = makeTidy({ secrets: ctx.secrets, homedir: d.homedir, platform: d.platform, fullPaths: flags.fullPaths });
-  const results = r.results.map((c) => tidyResult(c, tidy));
+  const results = r.results.map((c) => tidyResult(c, tidy)).map((c) => (copilotOnly(d) ? optionalOpenCode(c) : c));
   const s = summarize(results);
   const code = s.fail > 0 ? 1 : 0;
   let text: string;

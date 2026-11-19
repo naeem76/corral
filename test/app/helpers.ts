@@ -4,10 +4,13 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Emulator, InputEvent, PtyHandle, PtySpawn } from '../../src/types.ts';
+import type { AgentId, Emulator, InputEvent, PtyHandle, PtySpawn } from '../../src/types.ts';
 import { createInputDecoder } from '../../src/tui/input.ts';
 import { OpenCodeError, type Connection, type OpenCodeApi, type RequestOptions } from '../../src/core/opencode.ts';
 import { SessionTracker, type EventHandlers } from '../../src/core/sessions.ts';
+import { CopilotSource, type Timers } from '../../src/core/copilot.ts';
+import type { CopilotLaunch } from '../../src/core/copilot-launch.ts';
+import { SessionHub } from '../../src/core/session-hub.ts';
 import { Store } from '../../src/core/store.ts';
 import { createGit, type Git } from '../../src/core/git.ts';
 import { run } from '../../src/core/exe.ts';
@@ -236,8 +239,72 @@ export class FakePty implements PtyHandle {
 }
 
 export const okLauncher: Launcher = {
-  prepare: async () => ({ ok: true, command: '/usr/bin/opencode', shimNote: null, runnableHere: true }),
+  prepare: async (agent?: AgentId) =>
+    agent === 'copilot'
+      ? { ok: true, command: '/usr/bin/copilot', shimNote: null, runnableHere: true }
+      : { ok: true, command: '/usr/bin/opencode', shimNote: null, runnableHere: true },
 };
+
+/** Interval timers that run only when the test calls `fire()`. */
+export class ManualTimers implements Timers {
+  fns = new Map<number, { fn: () => void; ms: number }>();
+  #n = 0;
+  setInterval(fn: () => void, ms: number): unknown {
+    const id = ++this.#n;
+    this.fns.set(id, { fn, ms });
+    return id;
+  }
+  clearInterval(h: unknown): void {
+    this.fns.delete(h as number);
+  }
+  /** Run every timer with this interval (all when `ms` is omitted). */
+  fire(ms?: number): void {
+    for (const t of [...this.fns.values()]) if (ms === undefined || t.ms === ms) t.fn();
+  }
+}
+
+export interface FakeCopilotEvent {
+  type: string;
+  /** Milliseconds since epoch. Default: now. */
+  at?: number;
+  requestId?: string;
+  data?: Record<string, unknown>;
+}
+
+/** Write one Copilot session (workspace.yaml and, when given, events.jsonl) into a fake home. */
+export async function writeCopilotSession(
+  home: string,
+  s: { id: string; cwd: string; name?: string; created?: number; updated?: number; events?: FakeCopilotEvent[] },
+): Promise<string> {
+  const folder = path.join(home, 'session-state', s.id);
+  await mkdir(folder, { recursive: true });
+  const iso = (t: number) => new Date(t).toISOString();
+  const now = Date.now();
+  const lines = [`id: ${s.id}`, `cwd: ${s.cwd}`, 'client_name: github/cli'];
+  if (s.name !== undefined) lines.push(`name: ${s.name}`);
+  lines.push('user_named: false', `created_at: ${iso(s.created ?? now)}`, `updated_at: ${iso(s.updated ?? s.created ?? now)}`);
+  await writeFile(path.join(folder, 'workspace.yaml'), lines.join('\n') + '\n');
+  if (s.events) await writeCopilotEvents(home, s.id, s.events);
+  return folder;
+}
+
+export async function writeCopilotEvents(home: string, id: string, events: FakeCopilotEvent[]): Promise<void> {
+  const text = events
+    .map((e, i) => JSON.stringify({ id: `e${i}`, timestamp: new Date(e.at ?? Date.now()).toISOString(), parentId: null, type: e.type, data: { ...(e.data ?? {}), ...(e.requestId ? { requestId: e.requestId } : {}) } }))
+    .join('\n');
+  await writeFile(path.join(home, 'session-state', id, 'events.jsonl'), text + '\n');
+}
+
+/** A finished one-prompt Copilot session (turn ended at `at`). */
+export function finishedTurn(at: number): FakeCopilotEvent[] {
+  return [
+    { type: 'session.start', at: at - 5000 },
+    { type: 'user.message', at: at - 4000 },
+    { type: 'assistant.turn_start', at: at - 3000 },
+    { type: 'assistant.message', at: at - 2000 },
+    { type: 'assistant.turn_end', at },
+  ];
+}
 
 export interface Harness {
   app: App;
@@ -246,6 +313,11 @@ export interface Harness {
   events: FakeEvents;
   store: Store;
   tracker: SessionTracker;
+  hub: SessionHub;
+  /** Set with the `copilot` option. */
+  copilot: CopilotSource | null;
+  copilotHome: string;
+  timers: ManualTimers;
   ptys: FakePty[];
   logs: string[];
   dir: string;
@@ -274,6 +346,13 @@ export interface HarnessOptions {
   /** Use this folder for `state.json` (a restart test). Default: a new folder. */
   stateDir?: string;
   clock?: FakeClock;
+  /**
+   * Add a Copilot source over a fake home (`<dir>/copilot-home`). `program`: whether `copilot`
+   * resolves (default true). `setup` writes sessions before the app starts.
+   */
+  copilot?: { program?: boolean; launch?: CopilotLaunch; setup?: (home: string, dir: string) => Promise<void> };
+  /** `AppDeps.agentInstalled`. Default: OpenCode yes, Copilot from the source. */
+  agentInstalled?: (agent: AgentId) => boolean;
 }
 
 export async function tempDir(prefix = 'neb-app-'): Promise<string> {
@@ -307,12 +386,23 @@ export async function harness(opts: HarnessOptions = {}): Promise<Harness> {
   const events = new FakeEvents(clock);
   const logs: string[] = [];
   const tracker = new SessionTracker({ client: service, store, subscribe: events.subscribe, throttleMs: 1, now: clock.now });
+  const copilotHome = path.join(dir, 'copilot-home');
+  const timers = new ManualTimers();
+  let copilot: CopilotSource | null = null;
+  if (opts.copilot) {
+    await opts.copilot.setup?.(copilotHome, dir);
+    const program = opts.copilot.program ?? true;
+    const launch: CopilotLaunch =
+      opts.copilot.launch ?? (program ? { ok: true, kind: 'exe', command: '/usr/bin/copilot', args: [] } : { ok: false, reason: 'copilot (GitHub Copilot CLI) not found on PATH' });
+    copilot = new CopilotSource({ home: copilotHome, store, launch: () => launch, now: clock.now, timers });
+  }
+  const hub = new SessionHub(copilot ? [{ agent: 'opencode', source: tracker }, { agent: 'copilot', source: copilot }] : [{ agent: 'opencode', source: tracker }]);
   const ptys: FakePty[] = [];
   const deps: AppDeps = {
     terminal: term,
     store,
     git,
-    tracker,
+    hub,
     client: service,
     prs: opts.prs ?? { available: async () => false, list: async () => [] },
     launcher: opts.launcher ?? okLauncher,
@@ -336,13 +426,14 @@ export async function harness(opts: HarnessOptions = {}): Promise<Harness> {
     log: (l) => logs.push(l),
     redact: (t) => service.redact(t),
     resizeDebounceMs: 10,
+    ...(opts.agentInstalled ? { agentInstalled: opts.agentInstalled } : {}),
     ...opts.deps,
   };
   const app = new App(deps);
   app.start();
   if (opts.connect !== false) events.connect();
   const h: Harness = {
-    app, term, service, events, store, tracker, ptys, logs, dir, stateDir, deps, clock,
+    app, term, service, events, store, tracker, hub, copilot, copilotHome, timers, ptys, logs, dir, stateDir, deps, clock,
     screen() {
       const f = app.draw();
       const out: string[] = [];
