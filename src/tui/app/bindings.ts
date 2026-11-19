@@ -102,7 +102,7 @@ export function buildBindings(leaveKey: string = DEFAULT_LEAVE_KEY): BindingDef[
     b('half-down', 'inbox', ['ctrl+d'], 'half down', 'Half a list down'),
     b('half-up', 'inbox', ['ctrl+u'], 'half up', 'Half a list up'),
     b('inbox-pane', 'inbox', ['l', 'right', 'tab'], 'pane', 'Focus the pane when the session is open there'),
-    b('session-snooze', 'inbox', ['s'], 'snooze', 'Snooze: hide the session until a time, or until it needs input', { footer: true }),
+    b('session-snooze', 'inbox', ['s'], 'snooze', 'Snooze: hide the session until a time (1-8 a choice, c a custom time)', { footer: true }),
     b('session-settle', 'inbox', ['e'], 'settle', 'Settle ("done for now") or unsettle; new activity brings it back', { footer: true }),
     b('session-unmark', 'inbox', ['u'], 'reopen', 'Back to Open: remove the snooze or the settle mark', { footer: true }),
     b('inbox-show-settled', 'inbox', ['E'], 'settled', 'Show or hide the Settled section'),

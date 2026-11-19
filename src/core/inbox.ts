@@ -1,17 +1,50 @@
-// The inbox model: sections, order, snooze presets and snooze text. Pure functions; the clock
+// The inbox model: sections, order and snooze text. Snooze choices are in snooze.ts. Pure functions; the clock
 // comes in as `now` (milliseconds since epoch). Local time is read through `Date` only, so the
 // result follows the time zone of the machine (and its DST rules) without locale APIs.
 
-import { INBOX_SECTIONS, SNOOZE_UNTIL_INPUT } from '../types.ts';
+import { INBOX_SECTIONS } from '../types.ts';
 import type { InboxEntry, InboxInput, InboxSection, SessionMarks } from '../types.ts';
+
+/** A snooze end later than this after now is not real (the "until input" value of an earlier build). */
+export const MAX_SNOOZE_MS = 10 * 366 * 86_400_000;
+
+/**
+ * The snooze end of the marks, or undefined when there is none or it is not usable: not a
+ * finite number, or more than 10 years after now. Such a value counts as no snooze, so no
+ * session stays hidden for ever.
+ */
+export function snoozeEnd(marks: SessionMarks, now: number): number | undefined {
+  const u = marks.snoozedUntil;
+  return typeof u === 'number' && Number.isFinite(u) && u <= now + MAX_SNOOZE_MS ? u : undefined;
+}
+
+/**
+ * True when a running snooze ended early (rules: see `InboxSection`): the session needs input,
+ * or a turn failed after the snooze was set. A mark without `snoozedAt` (from an earlier
+ * build) ends early only for input.
+ */
+export function snoozeEndedEarly(input: InboxInput): boolean {
+  const { row, marks, activity } = input;
+  if (row.status === 'needs-input') return true;
+  const at = marks.snoozedAt;
+  // Not while a turn runs: a state read from the service can still hold the outcome of the
+  // turn before, and `activity` is then the start of the new turn.
+  return row.outcome === 'failed' && row.status !== 'working' && typeof at === 'number' && activity > at;
+}
+
+/** The snooze end when the session is snoozed now, else undefined. */
+export function activeSnooze(input: InboxInput, now: number): number | undefined {
+  const until = snoozeEnd(input.marks, now);
+  return until !== undefined && until > now && !snoozeEndedEarly(input) ? until : undefined;
+}
 
 /** The section of one session and whether its snooze ended unseen. Rules: see `InboxSection`. */
 export function classify(input: InboxInput, now: number): InboxEntry {
   const { row, marks, activity } = input;
-  const until = marks.snoozedUntil;
+  const until = snoozeEnd(marks, now);
   let section: InboxSection;
   if (row.status === 'needs-input') section = 'needs-input';
-  else if (until !== undefined && until > now) section = 'snoozed';
+  else if (activeSnooze(input, now) !== undefined) section = 'snoozed';
   else if (row.status === 'working') section = 'working';
   // 'unseen' means a turn ended that the user did not see: that is not "done for now".
   else if (marks.settledAt !== undefined && activity <= marks.settledAt && row.status === 'idle') section = 'settled';
@@ -34,7 +67,7 @@ function compareIn(section: InboxSection, a: InboxEntry, b: InboxEntry): number 
       return fa - fb || b.row.updated - a.row.updated;
     }
     case 'snoozed':
-      return (a.marks.snoozedUntil ?? SNOOZE_UNTIL_INPUT) - (b.marks.snoozedUntil ?? SNOOZE_UNTIL_INPUT);
+      return (a.marks.snoozedUntil ?? 0) - (b.marks.snoozedUntil ?? 0);
     case 'settled':
       return (b.marks.settledAt ?? 0) - (a.marks.settledAt ?? 0);
     default:
@@ -55,71 +88,33 @@ export interface MarkChange {
   patch: Partial<SessionMarks>;
 }
 
+const CLEAR_SNOOZE: Partial<SessionMarks> = { snoozedUntil: undefined, snoozedAt: undefined };
+
 /**
- * Mark changes the app must store: a request for input ends a running snooze for good.
- * (The pure rule already puts such a session in Needs input; without the change it would go
- * back to Snoozed when the request is answered.)
+ * Mark changes the app must store: a snooze that ended early ends for good (the pure rule
+ * already moves such a session out of Snoozed; without the change it would go back to Snoozed
+ * when the request is answered or a new turn starts), and an unusable snooze value is deleted.
  */
 export function marksToClear(inputs: readonly InboxInput[], now: number): MarkChange[] {
   const out: MarkChange[] = [];
   for (const i of inputs) {
-    const until = i.marks.snoozedUntil;
-    if (i.row.status === 'needs-input' && until !== undefined && until > now) out.push({ id: i.row.id, patch: { snoozedUntil: undefined } });
+    const raw = i.marks.snoozedUntil;
+    if (raw === undefined) continue;
+    const until = snoozeEnd(i.marks, now);
+    if (until === undefined || (until > now && snoozeEndedEarly(i))) out.push({ id: i.row.id, patch: { ...CLEAR_SNOOZE } });
   }
   return out;
 }
 
-/** The earliest snooze end later than `now` (a real time, not "until input"), or null. */
+/** The earliest snooze end later than `now`, or null. */
 export function nextWake(entries: readonly InboxInput[], now: number): number | null {
   let best: number | null = null;
   for (const e of entries) {
-    const u = e.marks.snoozedUntil;
-    if (u === undefined || u <= now || u >= SNOOZE_UNTIL_INPUT) continue;
+    const u = snoozeEnd(e.marks, now);
+    if (u === undefined || u <= now) continue;
     if (best === null || u < best) best = u;
   }
   return best;
-}
-
-// ---- snooze presets --------------------------------------------------------
-
-export type SnoozePresetId = 'hour' | 'three-hours' | 'tomorrow' | 'monday' | 'input';
-
-export interface SnoozePreset {
-  id: SnoozePresetId;
-  /** The key in the snooze menu. */
-  key: string;
-  label: string;
-}
-
-export const SNOOZE_PRESETS: readonly SnoozePreset[] = [
-  { id: 'hour', key: '1', label: '1 hour' },
-  { id: 'three-hours', key: '3', label: '3 hours' },
-  { id: 'tomorrow', key: 't', label: 'Tomorrow 09:00' },
-  { id: 'monday', key: 'w', label: 'Next Monday 09:00' },
-  { id: 'input', key: 'i', label: 'Until it needs input' },
-];
-
-const HOUR = 3_600_000;
-
-/** The `snoozedUntil` value of a preset. Calendar presets use local time. */
-export function snoozeUntil(id: SnoozePresetId, now: number): number {
-  const d = new Date(now);
-  switch (id) {
-    case 'hour':
-      return now + HOUR;
-    case 'three-hours':
-      return now + 3 * HOUR;
-    case 'tomorrow':
-      // The Date constructor carries a day overflow into the next month and year.
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 9, 0, 0, 0).getTime();
-    case 'monday': {
-      // Days to the next Monday; on a Monday that is the Monday of next week.
-      const days = (8 - d.getDay()) % 7 || 7;
-      return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days, 9, 0, 0, 0).getTime();
-    }
-    case 'input':
-      return SNOOZE_UNTIL_INPUT;
-  }
 }
 
 // ---- text ------------------------------------------------------------------
@@ -130,7 +125,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** Whole calendar days from the local day of `a` to the local day of `b`. */
-function dayDiff(a: Date, b: Date): number {
+export function dayDiff(a: Date, b: Date): number {
   const da = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
   const db = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
   // Round: a day with a DST change is 23 or 25 hours long.
@@ -149,8 +144,7 @@ export function formatTime(at: number, now: number): string {
   return `${t.getDate()} ${MONTHS[t.getMonth()]}${year} ${hm}`;
 }
 
-/** Text for a snoozed row: "until 14:30", "until Tue 09:00", "until 3 Dec 09:00", "until input". */
+/** Text for a snoozed row: "until 14:30", "until Tue 09:00", "until 3 Dec 09:00". */
 export function formatSnooze(until: number, now: number): string {
-  if (until >= SNOOZE_UNTIL_INPUT) return 'until input';
   return `until ${formatTime(until, now)}`;
 }

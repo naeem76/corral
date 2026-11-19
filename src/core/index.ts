@@ -19,5 +19,7 @@ export type { EventHandlers, EventSubscriber, SessionInfo, SessionMetaStore, Tra
 export { nullPrProvider } from './pr.ts';
 export type { PrProvider } from './pr.ts';
 export { createAzurePrProvider, mapPullRequest, parsePrList, pullRequestWebUrl, resolveAzLaunch, AZ_PR_LIST_ARGS } from './pr-azure.ts';
-export { buildInbox, classify, formatSnooze, formatTime, marksToClear, nextWake, SNOOZE_PRESETS, snoozeUntil } from './inbox.ts';
-export type { MarkChange, SnoozePreset, SnoozePresetId } from './inbox.ts';
+export { activeSnooze, buildInbox, classify, formatSnooze, formatTime, marksToClear, nextWake, snoozeEnd, snoozeEndedEarly } from './inbox.ts';
+export type { MarkChange } from './inbox.ts';
+export { parseSnoozePresets, parseSnoozeTime, resolveSnoozePreset, snoozeChoices, snoozeLabel, SNOOZE_TIME_FORMS } from './snooze.ts';
+export type { SnoozeChoice } from './snooze.ts';

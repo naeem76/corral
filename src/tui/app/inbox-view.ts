@@ -5,9 +5,11 @@
 // Marks (`SessionMarks`) are the program's own data in the store. The section rules are the
 // pure functions in core/inbox.ts.
 
-import type { InboxEntry, InboxInput, InboxSection, InputEvent, SessionRow } from '../../types.ts';
-import { INBOX_SECTIONS, SNOOZE_UNTIL_INPUT } from '../../types.ts';
-import { buildInbox, classify, formatSnooze, marksToClear, nextWake, SNOOZE_PRESETS, snoozeUntil } from '../../core/inbox.ts';
+import type { InboxEntry, InboxInput, InboxSection, InputEvent, SessionRow, SnoozePreset } from '../../types.ts';
+import { DEFAULT_SNOOZE_PRESETS, INBOX_SECTIONS } from '../../types.ts';
+import { activeSnooze, buildInbox, classify, formatSnooze, formatTime, marksToClear, nextWake, snoozeEnd } from '../../core/inbox.ts';
+import { parseSnoozePresets, parseSnoozeTime, snoozeChoices, SNOOZE_TIME_FORMS } from '../../core/snooze.ts';
+import { createTextInput } from '../widgets/textinput.ts';
 import { samePath } from '../../core/paths.ts';
 import type { Rect } from '../frame.ts';
 import { inset, rectContains } from '../widgets/layout.ts';
@@ -52,6 +54,8 @@ export class InboxView {
   #snap: Snapshot | null = null;
   #lastClick: { key: string | null; at: number } | null = null;
   #lastSelected: string | null = null;
+  /** The invalid `ui.snoozePresets` was reported in the log (once per run). */
+  #presetsWarned = false;
 
   constructor(app: App) {
     this.app = app;
@@ -143,7 +147,7 @@ export class InboxView {
     return Number.isFinite(s.validUntil) ? s.validUntil : null;
   }
 
-  /** Store the mark changes the pure rules cannot express (a request for input ends a snooze). */
+  /** Store the mark changes the pure rules cannot express (a snooze that ended early ends for good). */
   applyMarkRules(): void {
     for (const c of marksToClear(this.entries(), this.app.deps.now())) this.app.deps.store.setSessionMeta(c.id, c.patch);
   }
@@ -335,6 +339,19 @@ export class InboxView {
 
   // ---- marks ---------------------------------------------------------------
 
+  /** The snooze presets: `ui.snoozePresets` when it is a valid list, else the defaults. */
+  snoozePresets(): readonly SnoozePreset[] {
+    const raw = this.app.deps.store.ui.snoozePresets;
+    if (raw === undefined) return DEFAULT_SNOOZE_PRESETS;
+    const list = parseSnoozePresets(raw);
+    if (list) return list;
+    if (!this.#presetsWarned) {
+      this.#presetsWarned = true;
+      this.app.log('ui.snoozePresets in state.json is not a valid list; the default snooze choices are used.');
+    }
+    return DEFAULT_SNOOZE_PRESETS;
+  }
+
   /** The snooze menu for a session (from the inbox or the Sessions column). */
   snoozeMenu(row: SessionRow): void {
     const e = this.entryFor(row);
@@ -343,19 +360,17 @@ export class InboxView {
       return;
     }
     const now = this.app.deps.now();
-    const choices: Array<MenuItem & { run: () => void }> = SNOOZE_PRESETS.map((p) => {
-      const until = snoozeUntil(p.id, now);
-      return {
-        key: p.key,
-        label: p.label,
-        detail: p.id === 'input' ? '' : formatSnooze(until, now).replace(/^until /, ''),
-        run: () => this.snooze(row, until),
-      };
-    });
-    const snoozed = e?.marks.snoozedUntil !== undefined && e.marks.snoozedUntil > now;
-    if (snoozed) choices.push({ key: 'u', label: 'Remove the snooze', detail: '', run: () => this.unmark(row) });
+    const choices: Array<MenuItem & { run: () => void }> = snoozeChoices(this.snoozePresets(), now).map((c, i) => ({
+      key: String(i + 1),
+      label: c.label,
+      detail: formatTime(c.until, now),
+      run: () => this.snooze(row, c.until),
+    }));
+    choices.push({ key: 'c', label: 'Custom time…', detail: '', run: () => this.customSnooze(row) });
+    const active = e ? activeSnooze(e, now) : undefined;
+    if (active !== undefined) choices.push({ key: 'u', label: 'Remove the snooze', detail: '', run: () => this.unmark(row) });
     const title = row.title.trim() || '(untitled)';
-    const note = snoozed ? `Snoozed ${formatSnooze(e!.marks.snoozedUntil as number, now)}.` : `Hide "${title}" until:`;
+    const note = active !== undefined ? `Snoozed ${formatSnooze(active, now)}.` : `Hide "${title}" until:`;
     this.app.modal = {
       kind: 'menu',
       state: createMenu('Snooze', choices.map(({ key, label, detail }) => ({ key, label, detail })), note),
@@ -363,11 +378,28 @@ export class InboxView {
     };
   }
 
+  /** The text prompt for a custom snooze time. A bad text keeps it open with the error. */
+  customSnooze(row: SessionRow): void {
+    const title = row.title.trim() || '(untitled)';
+    this.app.modal = {
+      kind: 'prompt',
+      title: 'Snooze until',
+      label: `Hide "${title}" until (HH:MM, YYYY-MM-DD HH:MM, YYYY-MM-DD, or 30m, 2h, 3d, 1w):`,
+      input: createTextInput(''),
+      submit: (v) => {
+        const now = this.app.deps.now();
+        const until = parseSnoozeTime(v, now);
+        if (until === null) return v.trim() ? `Not a valid future time. ${SNOOZE_TIME_FORMS}` : SNOOZE_TIME_FORMS;
+        this.snooze(row, until);
+      },
+    };
+  }
+
   snooze(row: SessionRow, until: number): void {
-    this.app.deps.store.setSessionMeta(row.id, { snoozedUntil: until, settledAt: undefined });
-    this.#afterMark();
     const now = this.app.deps.now();
-    this.app.flash(until >= SNOOZE_UNTIL_INPUT ? 'Snoozed until it needs input. u removes the snooze.' : `Snoozed ${formatSnooze(until, now)}. u removes the snooze.`);
+    this.app.deps.store.setSessionMeta(row.id, { snoozedUntil: until, snoozedAt: now, settledAt: undefined });
+    this.#afterMark();
+    this.app.flash(`Snoozed ${formatSnooze(until, now)}. u removes the snooze.`);
   }
 
   /** Settle, or unsettle when the session is settled now. */
@@ -385,7 +417,7 @@ export class InboxView {
     }
     // Not earlier than the last activity: the service clock can be ahead of this machine.
     const at = Math.max(this.app.deps.now(), e?.activity ?? 0);
-    this.app.deps.store.setSessionMeta(row.id, { settledAt: at, snoozedUntil: undefined });
+    this.app.deps.store.setSessionMeta(row.id, { settledAt: at, snoozedUntil: undefined, snoozedAt: undefined });
     this.app.deps.tracker.markSeen(row.id);
     this.#afterMark();
     this.app.flash(this.app.view === 'inbox' && !this.showSettled ? 'Settled. E shows the Settled section.' : 'Settled.');
@@ -398,15 +430,18 @@ export class InboxView {
       this.app.flash('The session has no snooze and no settle mark.');
       return;
     }
-    this.app.deps.store.setSessionMeta(row.id, { snoozedUntil: undefined, settledAt: undefined });
+    this.app.deps.store.setSessionMeta(row.id, { snoozedUntil: undefined, snoozedAt: undefined, settledAt: undefined });
     this.#afterMark();
     this.app.flash(m.snoozedUntil !== undefined ? 'Snooze removed.' : 'Settle mark removed.');
   }
 
   /** The user opened the session: an ended snooze has done its job. */
   opened(id: string): void {
-    const until = this.app.deps.store.sessionMeta(id)?.snoozedUntil;
-    if (until !== undefined && until <= this.app.deps.now()) this.app.deps.store.setSessionMeta(id, { snoozedUntil: undefined });
+    const m = this.app.deps.store.sessionMeta(id);
+    if (!m || m.snoozedUntil === undefined) return;
+    const now = this.app.deps.now();
+    const until = snoozeEnd(m, now);
+    if (until === undefined || until <= now) this.app.deps.store.setSessionMeta(id, { snoozedUntil: undefined, snoozedAt: undefined });
   }
 
   #afterMark(): void {

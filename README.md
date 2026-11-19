@@ -72,10 +72,14 @@ The list has five sections, in this order:
 Snooze and settle are this program's own marks, kept in `state.json`. They do not change the
 session in OpenCode, and OpenCode's archive is a different thing.
 
-- **Snooze** hides a session until a time: 1 hour, 3 hours, tomorrow 09:00, next Monday 09:00
-  (on a Monday: the Monday of next week), or until it needs input. Times are local. A request
-  for input ends the snooze at once and for good. When the time passes, the session returns to
-  Open with a `back` tag; opening the session removes the tag.
+- **Snooze** hides a session until a time. The menu offers the snooze choices soonest first,
+  each with its local time: by default in 1 hour, in 3 hours, this evening (today 18:00),
+  tomorrow 09:00 and next week (Monday 09:00; on a Monday, the Monday of next week). A choice
+  whose time has passed (today 18:00 in the evening) is not offered. `c` asks for a custom time.
+  The snooze ends early, at once and for good, when the session needs input or when a turn
+  fails after you snoozed it. A turn that ends normally, or one that you interrupt, does not end
+  it. When the time passes, the session returns to Open with a `back` tag; opening the session
+  removes the tag.
 - **Settle** means "done for now". It is not possible while the session works or needs input.
   A settled session returns to Open (or Working) by itself when it has new activity.
 - A snooze deletes a settle mark, and a settle deletes a snooze.
@@ -87,7 +91,7 @@ session in OpenCode, and OpenCode's archive is a different thing.
 | click, double click | A click selects; a double click opens like `Enter` |
 | `Enter` | Open the session in the pane and focus the pane |
 | `l`, `→`, `Tab` | Focus the pane when the session is open |
-| `s` | Snooze menu: `1` 1 hour, `3` 3 hours, `t` tomorrow 09:00, `w` next Monday 09:00, `i` until it needs input, `u` remove the snooze, `Esc` cancel |
+| `s` | Snooze menu: `1`…`8` a choice (or `j`/`k` and `Enter`), `c` custom time, `u` remove the snooze, `Esc` cancel |
 | `e` | Settle, or unsettle a settled session |
 | `u` | Back to Open: remove the snooze or the settle mark |
 | `E` | Show or hide the Settled section |
@@ -100,6 +104,32 @@ session in OpenCode, and OpenCode's archive is a different thing.
 
 In the projects view, `s` and `e` in the Sessions column set the same marks. A row with an active
 snooze shows `zz`, a settled row shows `✓`.
+
+A custom time is one of these forms, in local time:
+
+| Form | Meaning |
+| --- | --- |
+| `17:30` | today at that time, or tomorrow when the time has passed |
+| `2026-12-01 09:00` | that day at that time |
+| `2026-12-01` | that day at 09:00 |
+| `30m`, `2h`, `3d`, `1w` | that much time from now (`90 m` and `2H` also work) |
+
+The snooze choices are `ui.snoozePresets` in `state.json`: a list of 1 to 8 items. `after` is a
+number of minutes from now (1 to 525600). `at` is a time `HH:MM` on a `day`: `today`,
+`tomorrow`, or a weekday (`monday` … `sunday`, the next such day after today). When one item
+is not valid, the program uses the defaults and writes one line to the log.
+
+```json
+"ui": {
+  "snoozePresets": [
+    { "kind": "after", "minutes": 30 },
+    { "kind": "after", "minutes": 120 },
+    { "kind": "at", "day": "today", "time": "17:00" },
+    { "kind": "at", "day": "tomorrow", "time": "08:30" },
+    { "kind": "at", "day": "friday", "time": "09:00" }
+  ]
+}
+```
 
 The width of the inbox list is `ui.inboxWidth` in `state.json` (default 56, minimum 30).
 

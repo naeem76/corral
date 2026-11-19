@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SNOOZE_UNTIL_INPUT, type InputEvent } from '../../src/types.ts';
+import type { InputEvent } from '../../src/types.ts';
 import { samePath } from '../../src/core/paths.ts';
-import { harness, modal, until, type Harness } from './helpers.ts';
+import { FakeClock, harness, modal, until, type Harness } from './helpers.ts';
 import { inboxFixture } from './inbox-fixture.ts';
 
 const HOUR = 3_600_000;
@@ -26,6 +26,30 @@ const lineWith = (h: Harness, text: string) => listLines(h).find((l) => l.includ
 function click(h: Harness, x: number, y: number): void {
   const ev: InputEvent = { type: 'mouse', x, y, button: 'left', action: 'down', ctrl: false, alt: false, shift: false, raw: '' };
   h.term.events([ev, { ...ev, action: 'up' }]);
+}
+
+/**
+ * A clock at a fixed local weekday and time: the Wednesday at least a week after today, so the
+ * snooze menu is the same on every run.
+ */
+function wednesdayClock(hour: number, minute = 0): FakeClock {
+  const d = new Date();
+  const ahead = 7 + ((3 - d.getDay() + 7) % 7 || 7);
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate() + ahead, hour, minute).getTime();
+  const clock = new FakeClock();
+  clock.offset = target - Date.now();
+  return clock;
+}
+
+/** The lines of the open modal box (between its borders), trimmed. */
+function modalLines(h: Harness): string[] {
+  const lines = h.screen();
+  const top = lines.findIndex((l) => /╭.*(Snooze)/.test(l));
+  if (top < 0) return [];
+  const bottom = lines.findIndex((l, i) => i > top && l.includes('╰'));
+  const left = [...(lines[top] as string)].indexOf('╭');
+  const right = [...(lines[top] as string)].indexOf('╮');
+  return lines.slice(top, bottom + 1).map((l) => [...l].slice(left, right + 1).join(''));
 }
 
 /** Sessions used by most tests: two projects and a worktree. */
@@ -106,10 +130,6 @@ test('a request for input moves a snoozed session to Needs input and ends the sn
     await until(() => h.store.sessionMeta('ses_b1')?.snoozedUntil === undefined, 2000, 'snooze removed');
     h.events.emit('permission.replied', { requestID: 'per_1' }, beta);
     await until(() => sectionOf(h, 'ses_b1') === 'open', 2000, 'back in Open, not Snoozed');
-    // "Until it needs input" ends the same way.
-    h.store.setSessionMeta('ses_a1', { snoozedUntil: SNOOZE_UNTIL_INPUT });
-    h.events.emit('form.created', { form: { id: 'frm_1', sessionID: 'ses_a1' } });
-    await until(() => h.store.sessionMeta('ses_a1') === undefined, 2000, 'snooze removed');
   } finally {
     await h.dispose();
   }
@@ -123,7 +143,7 @@ test('snooze from the menu; the session comes back with a tag when the time pass
     const m = modal(h);
     assert.equal(m?.kind, 'menu');
     const t = h.text();
-    for (const label of ['1 hour', '3 hours', 'Tomorrow 09:00', 'Next Monday 09:00', 'Until it needs input']) assert.ok(t.includes(label), label);
+    assert.ok(t.includes('In 1 hour'));
     assert.ok(!t.includes('Remove the snooze'));
     await h.type('1');
     assert.equal(modal(h), null);
@@ -395,13 +415,15 @@ test('marks, the view and the inbox selection survive a restart', async () => {
 });
 
 test('projects view: s and e in the Sessions column set the marks and show a tag', async () => {
-  const { h, beta } = await inboxFixture(standard(), { view: 'projects' });
+  const clock = wednesdayClock(14, 30);
+  const { h, beta } = await inboxFixture(standard(clock.now() - HOUR), { view: 'projects', clock });
   try {
     h.app.selectSession(h.store.projects[1]!, beta, 'ses_b1');
     h.app.focus = 'sessions';
     await h.type('s');
     assert.equal(modal(h)?.kind, 'menu');
-    await h.type('t');
+    assert.match(h.text(), /4\s+Tomorrow\s+Thu 09:00/);
+    await h.type('4');
     assert.ok((h.store.sessionMeta('ses_b1')?.snoozedUntil ?? 0) > h.clock.now());
     assert.match(lineWith(h, 'Beta one') ?? '', /zz 1h/);
     await h.type('e');
@@ -422,6 +444,196 @@ test('an empty inbox shows a hint', async () => {
     assert.match(h.text(), /Press v for the projects view/);
     await h.type('n');
     assert.match(h.text(), /Select a session first/);
+  } finally {
+    await h.dispose();
+  }
+});
+
+// ---- snooze choices, as in T3 Code -------------------------------------------
+
+test('the snooze menu shows the default choices soonest first with their times; a number key snoozes', async () => {
+  const clock = wednesdayClock(14, 30);
+  const { h } = await inboxFixture(standard(clock.now() - HOUR), { clock });
+  try {
+    h.app.inbox.select('ses_a1');
+    await h.type('s');
+    assert.equal(modal(h)?.kind, 'menu');
+    const box = modalLines(h);
+    if (process.env.NEBULA_PRINT_MENU) console.log(box.join('\n'));
+    const rows = box.map((l) => l.replace(/^│\s*|\s*│$/g, '').replace(/\s+/g, ' '));
+    const start = rows.findIndex((r) => r.startsWith('1 '));
+    assert.deepEqual(rows.slice(start, start + 6), [
+      '1 In 1 hour 15:30',
+      '2 In 3 hours 17:30',
+      '3 This evening 18:00',
+      '4 Tomorrow Thu 09:00',
+      '5 Next week Mon 09:00',
+      'c Custom time…',
+    ]);
+    assert.ok(rows.some((r) => r.includes('Hide "Alpha one" until:')));
+    assert.ok(!rows.some((r) => r.includes('Remove the snooze')));
+    // The old letter keys do nothing.
+    for (const k of ['t', 'w', 'i']) await h.type(k);
+    assert.equal(modal(h)?.kind, 'menu');
+    const before = h.clock.now();
+    await h.type('2');
+    assert.equal(modal(h), null);
+    const m = h.store.sessionMeta('ses_a1');
+    assert.ok(Math.abs((m?.snoozedUntil as number) - (before + 3 * HOUR)) < 2000, 'In 3 hours');
+    assert.ok(Math.abs((m?.snoozedAt as number) - before) < 2000, 'snoozedAt is the time of the snooze');
+    assert.equal(sectionOf(h, 'ses_a1'), 'snoozed');
+    assert.match(h.text(), /Snoozed until 17:30/);
+    // u in the menu removes both marks.
+    await h.type('s');
+    assert.match(h.text(), /u\s+Remove the snooze/);
+    await h.type('u');
+    assert.equal(h.store.sessionMeta('ses_a1'), undefined);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('late in the day the passed "today 18:00" choice is not offered', async () => {
+  const clock = wednesdayClock(19, 30);
+  const { h } = await inboxFixture(standard(clock.now() - HOUR), { clock });
+  try {
+    h.app.inbox.select('ses_a1');
+    await h.type('s');
+    const t = h.text();
+    assert.ok(!t.includes('This evening'));
+    assert.match(t, /1\s+In 1 hour\s+20:30/);
+    assert.match(t, /2\s+In 3 hours\s+22:30/);
+    assert.match(t, /3\s+Tomorrow\s+Thu 09:00/);
+    assert.match(t, /4\s+Next week\s+Mon 09:00/);
+    assert.ok(!/5\s+\S/.test(modalLines(h).join('\n')), 'four choices');
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('custom time: c opens a prompt; a bad text keeps it open with the error; a good one snoozes', async () => {
+  const clock = wednesdayClock(14, 30);
+  const { h } = await inboxFixture(standard(clock.now() - HOUR), { clock });
+  try {
+    h.app.inbox.select('ses_a1');
+    await h.type('s');
+    await h.type('c');
+    assert.equal(modal(h)?.kind, 'prompt');
+    await h.type('soon');
+    await h.type('\r');
+    const m = modal(h);
+    assert.equal(m?.kind, 'prompt', 'the prompt stays open');
+    assert.match(m?.kind === 'prompt' ? (m.error ?? '') : '', /Use HH:MM, YYYY-MM-DD, YYYY-MM-DD HH:MM, or 30m, 2h, 3d, 1w/);
+    assert.match(h.text(), /Not a valid future time/);
+    if (process.env.NEBULA_PRINT_MENU) console.log(h.screen().filter((l) => /[╭│╰]/.test(l)).join('\n'));
+    assert.equal(h.store.sessionMeta('ses_a1'), undefined);
+    // A past time is refused too.
+    await h.type('\x7f\x7f\x7f\x7f');
+    assert.ok(!(m?.kind === 'prompt' && m.error), 'typing clears the error');
+    const today = new Date(h.clock.now());
+    const pad = (n: number) => String(n).padStart(2, '0');
+    await h.type(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())} 10:00\r`);
+    assert.equal(modal(h)?.kind, 'prompt');
+    assert.match(h.text(), /Not a valid future time/);
+    await h.type('\x7f'.repeat(16));
+    const before = h.clock.now();
+    await h.type('90 m\r');
+    assert.equal(modal(h), null);
+    const marks = h.store.sessionMeta('ses_a1');
+    assert.ok(Math.abs((marks?.snoozedUntil as number) - (before + 90 * 60_000)) < 2000);
+    assert.ok(typeof marks?.snoozedAt === 'number');
+    assert.equal(sectionOf(h, 'ses_a1'), 'snoozed');
+    // HH:MM later today.
+    h.app.inbox.select('ses_b1');
+    await h.type('s');
+    await h.type('c');
+    await h.type('17:45\r');
+    const u = new Date(h.store.sessionMeta('ses_b1')?.snoozedUntil as number);
+    assert.deepEqual([u.getDate(), u.getHours(), u.getMinutes()], [today.getDate(), 17, 45]);
+    // Esc in the prompt cancels.
+    h.app.inbox.select('ses_w1');
+    await h.type('s');
+    await h.type('c');
+    await h.type('\x1b');
+    await until(() => modal(h) === null, 2000, 'prompt closed');
+    assert.equal(h.store.sessionMeta('ses_w1'), undefined);
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('ui.snoozePresets replaces the defaults; an invalid list falls back and is logged once', async () => {
+  const clock = wednesdayClock(14, 30);
+  const presets = [{ kind: 'after', minutes: 30 }, { kind: 'at', day: 'friday', time: '08:00' }, { kind: 'after', minutes: 2880 }];
+  const { h } = await inboxFixture(standard(clock.now() - HOUR), {
+    clock,
+    setupState: async (store) => store.setUi({ snoozePresets: presets }),
+  });
+  try {
+    h.app.inbox.select('ses_a1');
+    await h.type('s');
+    const t = h.text();
+    assert.match(t, /1\s+In 30 minutes\s+15:00/);
+    assert.match(t, /2\s+Friday\s+Fri 08:00/);
+    assert.match(t, /3\s+In 2 days\s+Fri 14:30/);
+    assert.ok(!t.includes('In 1 hour'));
+    await h.type('\x1b');
+    // An invalid list: the defaults, and one line in the log.
+    h.store.setUi({ snoozePresets: [{ kind: 'after', minutes: 30 }, { kind: 'at', day: 'someday', time: '08:00' }] });
+    await h.type('s');
+    assert.match(h.text(), /1\s+In 1 hour\s+15:30/);
+    await h.type('\x1b');
+    await h.type('s');
+    await h.type('\x1b');
+    assert.equal(h.logs.filter((l) => l.includes('snoozePresets')).length, 1);
+    assert.ok(!h.text().includes('snoozePresets'), 'not in the UI');
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a failed turn after the snooze brings the session back; a normal or interrupted end does not', async () => {
+  const { h, alpha, beta } = await inboxFixture(standard());
+  try {
+    for (const id of ['ses_a1', 'ses_a2', 'ses_b1']) {
+      h.app.inbox.select(id);
+      await h.type('s');
+      await h.type('2');
+      assert.equal(sectionOf(h, id), 'snoozed', id);
+    }
+    h.clock.advance(1000);
+    const turn = (id: string, end: string, dir: string) => {
+      h.events.emit('session.execution.started', { sessionID: id }, dir);
+      h.events.emit(`session.execution.${end}`, { sessionID: id }, dir);
+    };
+    turn('ses_a2', 'succeeded', alpha);
+    turn('ses_b1', 'interrupted', beta);
+    turn('ses_a1', 'failed', alpha);
+    await until(() => sectionOf(h, 'ses_a1') === 'open', 2000, 'failed session in Open');
+    await until(() => h.store.sessionMeta('ses_a1')?.snoozedUntil === undefined, 2000, 'snooze deleted');
+    assert.equal(h.store.sessionMeta('ses_a1')?.snoozedAt, undefined);
+    assert.match(lineWith(h, 'Alpha one') ?? '', /failed/);
+    assert.doesNotMatch(lineWith(h, 'Alpha one') ?? '', /back/);
+    await h.settle();
+    assert.equal(sectionOf(h, 'ses_a2'), 'snoozed', 'a normal end does not end the snooze');
+    assert.equal(sectionOf(h, 'ses_b1'), 'snoozed', 'an interrupted turn does not end the snooze');
+    // The next turn does not snooze it again.
+    h.events.emit('session.execution.started', { sessionID: 'ses_a1' }, alpha);
+    await until(() => sectionOf(h, 'ses_a1') === 'working', 2000, 'working, not snoozed');
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('a snooze value of the earlier "until input" build counts as no snooze and is deleted', async () => {
+  const { h, alpha } = await inboxFixture(standard(), {
+    setupState: async (store) => store.setSessionMeta('ses_a1', { snoozedUntil: 8_640_000_000_000_000 }),
+  });
+  try {
+    assert.equal(sectionOf(h, 'ses_a1'), 'open');
+    assert.doesNotMatch(lineWith(h, 'Alpha one') ?? '', /back|until/);
+    h.events.emit('session.execution.started', { sessionID: 'ses_a2' }, alpha);
+    await until(() => h.store.sessionMeta('ses_a1') === undefined, 2000, 'old value deleted');
   } finally {
     await h.dispose();
   }

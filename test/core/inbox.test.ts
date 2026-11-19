@@ -1,15 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SNOOZE_UNTIL_INPUT, type InboxInput, type Project, type SessionMarks, type SessionRow, type SessionStatus } from '../../src/types.ts';
-import {
-  buildInbox, classify, formatSnooze, formatTime, marksToClear, nextWake, SNOOZE_PRESETS, snoozeUntil,
-} from '../../src/core/inbox.ts';
+import type { InboxInput, Project, SessionMarks, SessionRow, SessionStatus } from '../../src/types.ts';
+import { buildInbox, classify, formatSnooze, formatTime, marksToClear, nextWake, snoozeEnd } from '../../src/core/inbox.ts';
 
 const project: Project = { id: 'p1', path: '/w/p', name: 'p', kind: 'dir' };
 const NOW = 1_000_000_000_000;
+/** The "until it needs input" value of the earlier build, still in old state files. */
+const OLD_SENTINEL = 8_640_000_000_000_000;
+const YEAR = 365 * 86_400_000;
+const HOUR = 3_600_000;
 
-function inp(id: string, status: SessionStatus, marks: SessionMarks = {}, extra: { updated?: number; activity?: number } = {}): InboxInput {
+type Outcome = SessionRow['outcome'];
+
+function inp(
+  id: string,
+  status: SessionStatus,
+  marks: SessionMarks = {},
+  extra: { updated?: number; activity?: number; outcome?: Outcome } = {},
+): InboxInput {
   const row: SessionRow = { id, title: id, directory: '/w/p', created: 1, updated: extra.updated ?? 100, status, archived: false };
+  if (extra.outcome) row.outcome = extra.outcome;
   return { row, activity: extra.activity ?? 0, marks, project };
 }
 
@@ -19,7 +29,7 @@ test('classify: the first matching rule wins', () => {
   assert.equal(sec(inp('a', 'needs-input', { snoozedUntil: NOW + 1000, settledAt: NOW })), 'needs-input');
   // A running snooze beats working and settled.
   assert.equal(sec(inp('a', 'working', { snoozedUntil: NOW + 1 })), 'snoozed');
-  assert.equal(sec(inp('a', 'idle', { snoozedUntil: SNOOZE_UNTIL_INPUT, settledAt: NOW })), 'snoozed');
+  assert.equal(sec(inp('a', 'idle', { snoozedUntil: NOW + 1000, settledAt: NOW })), 'snoozed');
   // An ended snooze does not count.
   assert.equal(sec(inp('a', 'working', { snoozedUntil: NOW })), 'working');
   assert.equal(sec(inp('a', 'idle', { snoozedUntil: NOW - 5 })), 'open');
@@ -40,7 +50,7 @@ test('classify: woke after the snooze time until the user opens the session', ()
   assert.equal(classify(inp('a', 'idle', { snoozedUntil: at, lastSeen: at - 1 }), NOW).woke, true);
   assert.equal(classify(inp('a', 'idle', { snoozedUntil: at, lastSeen: at }), NOW).woke, false, 'seen at or after the time');
   assert.equal(classify(inp('a', 'idle', { snoozedUntil: NOW + 1 }), NOW).woke, false, 'still snoozed');
-  assert.equal(classify(inp('a', 'idle', { snoozedUntil: SNOOZE_UNTIL_INPUT }), NOW).woke, false);
+  assert.equal(classify(inp('a', 'idle', { snoozedUntil: OLD_SENTINEL }), NOW).woke, false);
   assert.equal(classify(inp('a', 'idle'), NOW).woke, false);
   // Woke also shows in another section (a working session that came back).
   const w = classify(inp('a', 'working', { snoozedUntil: at }), NOW);
@@ -53,7 +63,6 @@ test('buildInbox: section order, then the order inside each section', () => {
     [
       inp('set_old', 'idle', { settledAt: 10 }),
       inp('set_new', 'idle', { settledAt: 20 }),
-      inp('snz_input', 'idle', { snoozedUntil: SNOOZE_UNTIL_INPUT }),
       inp('snz_late', 'idle', { snoozedUntil: NOW + 5000 }),
       inp('snz_soon', 'working', { snoozedUntil: NOW + 1000 }),
       inp('open_old', 'idle', {}, { updated: 10 }),
@@ -75,7 +84,7 @@ test('buildInbox: section order, then the order inside each section', () => {
       'working:work_new', 'working:work_a', 'working:work_b',
       // Woke and unseen first (newest first among them), then the rest by update time.
       'open:open_unseen', 'open:open_woke', 'open:open_new', 'open:open_old',
-      'snoozed:snz_soon', 'snoozed:snz_late', 'snoozed:snz_input',
+      'snoozed:snz_soon', 'snoozed:snz_late',
       'settled:set_new', 'settled:set_old',
     ],
   );
@@ -84,64 +93,77 @@ test('buildInbox: section order, then the order inside each section', () => {
   assert.deepEqual(tie.map((e) => e.row.id), ['a', 'b']);
 });
 
-test('marksToClear: only a running snooze of a session that needs input', () => {
+test('classify: a failed turn after the snooze was set ends it early; other turns do not', () => {
+  const set = NOW - 60_000;
+  const marks = { snoozedUntil: NOW + HOUR, snoozedAt: set };
+  const sec = (outcome: Outcome, activity: number, m: SessionMarks = marks, status: SessionStatus = 'unseen') =>
+    classify(inp('a', status, m, { outcome, activity }), NOW);
+  const failed = sec('failed', set + 1);
+  assert.equal(failed.section, 'open', 'a failed turn after the snooze: Open in the same pass');
+  assert.equal(failed.woke, false, 'not "back": the time did not pass');
+  assert.equal(sec('failed', set + 1, marks, 'idle').section, 'open');
+  assert.equal(sec('failed', set).section, 'snoozed', 'activity not later than snoozedAt');
+  assert.equal(sec('failed', set - 5000).section, 'snoozed', 'a failed turn before the snooze');
+  assert.equal(sec('succeeded', set + 1).section, 'snoozed', 'a normal end does not end it');
+  assert.equal(sec('interrupted', set + 1).section, 'snoozed', 'an interrupted turn does not end it');
+  assert.equal(sec(undefined, set + 1).section, 'snoozed');
+  assert.equal(sec('failed', set + 1, { snoozedUntil: NOW + HOUR }).section, 'snoozed', 'no snoozedAt (earlier build): no early end');
+  assert.equal(sec('failed', set + 1, marks, 'working').section, 'snoozed', 'a new turn runs: the failed outcome is of the turn before');
+});
+
+test('classify: an unusable snooze value counts as no snooze', () => {
+  const sec = (u: unknown) => classify(inp('a', 'idle', { snoozedUntil: u as number }), NOW).section;
+  assert.equal(sec(OLD_SENTINEL), 'open');
+  assert.equal(sec(NOW + 11 * YEAR), 'open', 'more than 10 years ahead');
+  assert.equal(sec(Infinity), 'open');
+  assert.equal(sec(Number.NaN), 'open');
+  assert.equal(sec('soon'), 'open');
+  assert.equal(sec(NOW + 9 * YEAR), 'snoozed', 'nine years is still a snooze');
+  assert.equal(snoozeEnd({ snoozedUntil: OLD_SENTINEL }, NOW), undefined);
+  assert.equal(snoozeEnd({ snoozedUntil: NOW + 5 }, NOW), NOW + 5);
+  assert.equal(snoozeEnd({}, NOW), undefined);
+});
+
+test('marksToClear: a snooze that ended early, and unusable values; both marks go', () => {
+  const set = NOW - 60_000;
   const changes = marksToClear(
     [
       inp('ask_snoozed', 'needs-input', { snoozedUntil: NOW + 10 }),
-      inp('ask_input', 'needs-input', { snoozedUntil: SNOOZE_UNTIL_INPUT }),
       inp('ask_ended', 'needs-input', { snoozedUntil: NOW - 10 }),
       inp('work_snoozed', 'working', { snoozedUntil: NOW + 10 }),
       inp('ask_plain', 'needs-input'),
+      inp('fail_after', 'unseen', { snoozedUntil: NOW + HOUR, snoozedAt: set }, { outcome: 'failed', activity: set + 1 }),
+      inp('fail_before', 'idle', { snoozedUntil: NOW + HOUR, snoozedAt: set }, { outcome: 'failed', activity: set - 1 }),
+      inp('fail_no_at', 'unseen', { snoozedUntil: NOW + HOUR }, { outcome: 'failed', activity: set + 1 }),
+      inp('ok_after', 'unseen', { snoozedUntil: NOW + HOUR, snoozedAt: set }, { outcome: 'succeeded', activity: set + 1 }),
+      inp('stop_after', 'unseen', { snoozedUntil: NOW + HOUR, snoozedAt: set }, { outcome: 'interrupted', activity: set + 1 }),
+      inp('fail_ended', 'unseen', { snoozedUntil: NOW - 10, snoozedAt: set }, { outcome: 'failed', activity: set + 1 }),
+      inp('sentinel', 'idle', { snoozedUntil: OLD_SENTINEL }),
+      inp('far', 'idle', { snoozedUntil: NOW + 11 * YEAR, snoozedAt: set }),
     ],
     NOW,
   );
+  const clear = { snoozedUntil: undefined, snoozedAt: undefined };
   assert.deepEqual(changes, [
-    { id: 'ask_snoozed', patch: { snoozedUntil: undefined } },
-    { id: 'ask_input', patch: { snoozedUntil: undefined } },
+    { id: 'ask_snoozed', patch: clear },
+    { id: 'fail_after', patch: clear },
+    { id: 'sentinel', patch: clear },
+    { id: 'far', patch: clear },
   ]);
-  assert.ok('snoozedUntil' in (changes[0]?.patch ?? {}), 'the key is there, with undefined, to delete it');
+  const patch = changes[0]?.patch ?? {};
+  assert.ok('snoozedUntil' in patch && 'snoozedAt' in patch, 'the keys are there, with undefined, to delete them');
 });
 
 test('nextWake: the earliest real snooze end after now', () => {
   assert.equal(nextWake([], NOW), null);
   assert.equal(
-    nextWake([inp('a', 'idle', { snoozedUntil: SNOOZE_UNTIL_INPUT }), inp('b', 'idle', { snoozedUntil: NOW - 1 }), inp('c', 'idle', { snoozedUntil: NOW })], NOW),
+    nextWake([inp('a', 'idle', { snoozedUntil: OLD_SENTINEL }), inp('b', 'idle', { snoozedUntil: NOW - 1 }), inp('c', 'idle', { snoozedUntil: NOW })], NOW),
     null,
   );
   assert.equal(nextWake([inp('a', 'idle', { snoozedUntil: NOW + 50 }), inp('b', 'idle', { snoozedUntil: NOW + 20 }), inp('c', 'idle')], NOW), NOW + 20);
 });
 
 const at = (y: number, m: number, d: number, h = 0, mi = 0) => new Date(y, m, d, h, mi).getTime();
-
-test('snooze presets: hours, tomorrow and next Monday in local time', () => {
-  assert.deepEqual(SNOOZE_PRESETS.map((p) => p.key), ['1', '3', 't', 'w', 'i']);
-  const now = at(2026, 10, 18, 14, 30); // Wednesday 18 Nov 2026
-  assert.equal(new Date(now).getDay(), 3);
-  assert.equal(snoozeUntil('hour', now), now + 3_600_000);
-  assert.equal(snoozeUntil('three-hours', now), now + 3 * 3_600_000);
-  assert.equal(snoozeUntil('tomorrow', now), at(2026, 10, 19, 9));
-  assert.equal(snoozeUntil('monday', now), at(2026, 10, 23, 9));
-  assert.equal(snoozeUntil('input', now), SNOOZE_UNTIL_INPUT);
-  // Month and year ends.
-  assert.equal(snoozeUntil('tomorrow', at(2026, 10, 30, 23, 59)), at(2026, 11, 1, 9));
-  assert.equal(snoozeUntil('tomorrow', at(2026, 11, 31, 8)), at(2027, 0, 1, 9));
-  assert.equal(snoozeUntil('monday', at(2026, 11, 30, 10)), at(2027, 0, 4, 9)); // Wednesday 30 Dec
-  // On a Monday: the Monday of next week, even before 09:00.
-  const monday = at(2026, 10, 16, 7);
-  assert.equal(new Date(monday).getDay(), 1);
-  assert.equal(snoozeUntil('monday', monday), at(2026, 10, 23, 9));
-  // Sunday: the next day.
-  assert.equal(snoozeUntil('monday', at(2026, 10, 22, 22)), at(2026, 10, 23, 9));
-  // Every result of a calendar preset is 09:00 local, also across DST changes of any zone.
-  for (let day = 0; day < 400; day += 3) {
-    const n = at(2026, 0, 1 + day, 12);
-    for (const id of ['tomorrow', 'monday'] as const) {
-      const d = new Date(snoozeUntil(id, n));
-      assert.deepEqual([d.getHours(), d.getMinutes()], [9, 0], `${id} from day ${day}`);
-      assert.ok(d.getTime() > n);
-    }
-  }
-});
 
 test('formatSnooze and formatTime: fixed English text from numbers', () => {
   const now = at(2026, 10, 18, 10, 5); // Wednesday
@@ -151,7 +173,6 @@ test('formatSnooze and formatTime: fixed English text from numbers', () => {
   assert.equal(formatSnooze(at(2026, 10, 25, 9), now), 'until 25 Nov 09:00', 'seven days and more: the date');
   assert.equal(formatSnooze(at(2026, 11, 3, 9), now), 'until 3 Dec 09:00');
   assert.equal(formatSnooze(at(2027, 0, 12, 9), now), 'until 12 Jan 2027 09:00');
-  assert.equal(formatSnooze(SNOOZE_UNTIL_INPUT, now), 'until input');
   // Over the year end the weekday form still works.
   assert.equal(formatSnooze(at(2027, 0, 1, 9), at(2026, 11, 31, 20)), 'until Fri 09:00');
   // Past times (the information panel) use the date form.

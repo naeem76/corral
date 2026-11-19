@@ -199,13 +199,14 @@ export interface SessionMarks {
   /** When the user last looked at the session in this program. */
   lastSeen?: number;
   /**
-   * The session is hidden in the Snoozed section until this time. `SNOOZE_UNTIL_INPUT` means
-   * no time limit: only a request for input ends the snooze.
+   * The session is hidden in the Snoozed section until this time.
    * The mark stays after the time passes, so the inbox can show that the session came back;
    * it is deleted when the user opens the session, snoozes again or removes the snooze.
-   * It is deleted at once when the session needs input during the snooze.
+   * It is deleted at once when the snooze ends early (see `InboxSection`).
    */
   snoozedUntil?: number;
+  /** When the user set the snooze. Set and deleted together with `snoozedUntil`. */
+  snoozedAt?: number;
   /**
    * When the user settled the session ("done for now"). It counts only while the session has
    * no activity later than this time, so a settled session comes back by itself.
@@ -213,17 +214,36 @@ export interface SessionMarks {
   settledAt?: number;
 }
 
-/** `snoozedUntil` value for "until the session needs input". Larger than any real time. */
-export const SNOOZE_UNTIL_INPUT = 8_640_000_000_000_000;
+/**
+ * One choice of the snooze menu, the same model as T3 Code:
+ *   after  a number of minutes from now
+ *   at     a local time of day on a day: 'today', 'tomorrow', or the next such weekday after
+ *          today. `time` is 'HH:MM' in 24-hour form.
+ * A choice whose time is not later than now is not offered.
+ */
+export type SnoozeDay = 'today' | 'tomorrow' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+export type SnoozePreset = { kind: 'after'; minutes: number } | { kind: 'at'; day: SnoozeDay; time: string };
+
+/** The default choices (the defaults of T3 Code). `ui.snoozePresets` in `state.json` replaces them. */
+export const DEFAULT_SNOOZE_PRESETS: readonly SnoozePreset[] = [
+  { kind: 'after', minutes: 60 },
+  { kind: 'after', minutes: 180 },
+  { kind: 'at', day: 'today', time: '18:00' },
+  { kind: 'at', day: 'tomorrow', time: '09:00' },
+  { kind: 'at', day: 'monday', time: '09:00' },
+];
 
 /**
  * Sections of the inbox, in display order. A session is in exactly one section.
  * The first rule that matches decides:
  *   needs-input  status 'needs-input' (always; it ends a snooze and overrides settled)
- *   snoozed      `snoozedUntil` is later than now
+ *   snoozed      `snoozedUntil` is later than now, and the snooze did not end early
  *   working      status 'working'
  *   settled      `settledAt` is set, and the session has no activity later than it
  *   open         every other session
+ * A snooze ends early, as in T3 Code, when the session needs input, or when a turn failed
+ * after the snooze was set (`outcome` 'failed' and activity later than `snoozedAt`). A turn
+ * that ends normally does not end it.
  * Archived sessions and child sessions are not in the inbox.
  */
 export type InboxSection = 'needs-input' | 'working' | 'open' | 'snoozed' | 'settled';

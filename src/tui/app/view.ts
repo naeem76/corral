@@ -180,7 +180,7 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
       dotAt(fr, r.x + 1, r.y, s.status, bg);
       const live = app.panes.has(s.id);
       const time = relativeTime(s.updated, now);
-      const tag = markTag(app, s, now);
+      const tag = markTag(app, s);
       const right = (live ? '▸ ' : '') + (tag ? tag + ' ' : '') + time;
       const rw = stringWidth(right);
       const t = clean(s.title) || 'New session';
@@ -191,11 +191,11 @@ function drawSessions(f: Frame, app: App, outer: Rect): void {
 }
 
 /** The inbox mark of a row in the Sessions column: an active snooze or an effective settle. */
-function markTag(app: App, s: SessionRow, now: number): string {
+function markTag(app: App, s: SessionRow): string {
   const m = app.deps.store.sessionMeta(s.id);
   if (!m || (m.snoozedUntil === undefined && m.settledAt === undefined)) return '';
-  if (m.snoozedUntil !== undefined && m.snoozedUntil > now && s.status !== 'needs-input') return th.glyphs.snoozed;
-  return app.inbox.entryFor(s)?.section === 'settled' ? th.glyphs.settled : '';
+  const section = app.inbox.entryFor(s)?.section;
+  return section === 'snoozed' ? th.glyphs.snoozed : section === 'settled' ? th.glyphs.settled : '';
 }
 
 // ---- Pane ------------------------------------------------------------------
@@ -336,10 +336,14 @@ export function drawModalLayer(f: Frame, app: App, screen: Rect): void {
     case 'prompt': {
       const width = Math.min(70, Math.max(30, screen.w - 4));
       const lines = wrapText(m.label, width - 4);
-      drawModal(f, screen, { title: m.title, width, height: lines.length + 4, theme: th }, (fr, inner) => {
+      const errLines = m.error ? wrapText(m.error, width - 4) : [];
+      const height = lines.length + 4 + (errLines.length ? errLines.length + 1 : 0);
+      drawModal(f, screen, { title: m.title, width, height, theme: th }, (fr, inner) => {
         let y = inner.y;
         for (const l of lines) fr.text(inner.x, y++, l, th.dim, inner.w);
         m.input = renderTextInput(fr, { x: inner.x, y: y + 1, w: inner.w, h: 1 }, m.input, { focused: true, style: th.selection });
+        y += 3;
+        for (const l of errLines) fr.text(inner.x, y++, l, th.danger, inner.w);
       });
       return;
     }

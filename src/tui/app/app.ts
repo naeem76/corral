@@ -141,7 +141,15 @@ export type GitRow =
 
 export type Modal =
   | { kind: 'browser'; state: BrowserState }
-  | { kind: 'prompt'; title: string; label: string; input: TextInputState; submit: (value: string) => void }
+  | {
+      kind: 'prompt';
+      title: string;
+      label: string;
+      input: TextInputState;
+      /** A string keeps the prompt open and shows it as the error. */
+      submit: (value: string) => string | void;
+      error?: string;
+    }
   | { kind: 'confirm'; state: ConfirmState; yes: () => void; no?: () => void }
   | { kind: 'menu'; state: MenuState; choose: (index: number) => void }
   | { kind: 'help'; scroll: number };
@@ -1023,8 +1031,15 @@ export class App {
         if (r.action === 'cancel') this.modal = null;
         else if (r.action === 'submit') {
           this.modal = null;
-          m.submit(m.input.value);
-        } else m.input = r.state;
+          const error = m.submit(m.input.value);
+          if (typeof error === 'string' && this.modal === null) {
+            m.error = error;
+            this.modal = m;
+          }
+        } else {
+          if (r.state.value !== m.input.value) delete m.error;
+          m.input = r.state;
+        }
         return;
       }
       case 'browser': {
