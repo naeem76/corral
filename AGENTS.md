@@ -2,7 +2,8 @@
 
 A terminal program that manages OpenCode sessions: a Projects column, a Git column
 (checkouts, worktrees, pull requests, and folders without Git), a Sessions column, and a pane
-that shows the OpenCode TUI. A second view (an inbox with snooze) comes later.
+that shows the OpenCode TUI. A second view, the inbox, shows the same sessions in sections
+with snooze and settle.
 
 It replaces Nebula (a Rust TUI) and T3 Code for a workplace where neither is permitted.
 
@@ -107,6 +108,22 @@ resume, rename, archive), embedded pane with the OpenCode TUI, `doctor` command.
 
 Out of scope: other agent CLIs, presets, issues, diff viewer, file finder, SSH, tunnel,
 browser mode, workspaces, notes, links, run commands, hooks, plugins, settings overlay.
+
+## Product scope (stage 2): the inbox view
+
+A second view of the same sessions, in the style of the T3 Code inbox. `v` switches between the
+projects view and the inbox view; the choice is saved in `ui.view` (`'projects'` | `'inbox'`).
+
+- One list of all sessions of all registered projects (root folders and worktrees), with the
+  pane at the right. Archived sessions and child sessions are not shown.
+- Sections in this order: Needs input, Working, Open, Snoozed, Settled. The rules are in
+  `src/types.ts` (`InboxSection`). The classification is a pure function in `src/core/inbox.ts`.
+- Marks are the program's own data (`SessionMarks` in `state.json`, key = OpenCode session id).
+  OpenCode's archive is a different thing and stays as it is.
+- Snooze ends at the chosen time, or earlier when the session needs input. A session whose
+  snooze time passed returns to Open with a "back" tag until the user opens it.
+- Settle means "done for now". A settled session returns to Open or Working by itself when it
+  has new activity.
 
 Own state: one JSON file (`state.json`) in the user data directory
 (`%LOCALAPPDATA%\nebula-enterprise` on Windows, `$XDG_STATE_HOME/nebula-enterprise` or

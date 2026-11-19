@@ -188,6 +188,66 @@ export interface SessionRow {
 }
 
 // ---------------------------------------------------------------------------
+// Inbox view (src/core/inbox, src/tui/app)
+// ---------------------------------------------------------------------------
+
+/**
+ * The program's own marks for one session, stored in `state.json` under the OpenCode session
+ * id. OpenCode knows nothing about them. All times are milliseconds since epoch.
+ */
+export interface SessionMarks {
+  /** When the user last looked at the session in this program. */
+  lastSeen?: number;
+  /**
+   * The session is hidden in the Snoozed section until this time. `SNOOZE_UNTIL_INPUT` means
+   * no time limit: only a request for input ends the snooze.
+   * The mark stays after the time passes, so the inbox can show that the session came back;
+   * it is deleted when the user opens the session, snoozes again or removes the snooze.
+   * It is deleted at once when the session needs input during the snooze.
+   */
+  snoozedUntil?: number;
+  /**
+   * When the user settled the session ("done for now"). It counts only while the session has
+   * no activity later than this time, so a settled session comes back by itself.
+   */
+  settledAt?: number;
+}
+
+/** `snoozedUntil` value for "until the session needs input". Larger than any real time. */
+export const SNOOZE_UNTIL_INPUT = 8_640_000_000_000_000;
+
+/**
+ * Sections of the inbox, in display order. A session is in exactly one section.
+ * The first rule that matches decides:
+ *   needs-input  status 'needs-input' (always; it ends a snooze and overrides settled)
+ *   snoozed      `snoozedUntil` is later than now
+ *   working      status 'working'
+ *   settled      `settledAt` is set, and the session has no activity later than it
+ *   open         every other session
+ * Archived sessions and child sessions are not in the inbox.
+ */
+export type InboxSection = 'needs-input' | 'working' | 'open' | 'snoozed' | 'settled';
+
+export const INBOX_SECTIONS: readonly InboxSection[] = ['needs-input', 'working', 'open', 'snoozed', 'settled'];
+
+/** What the inbox needs to know about one session. */
+export interface InboxInput {
+  row: SessionRow;
+  /** Start or end of the last turn (`max(time.busy, time.idle)` of the session); 0 when none. */
+  activity: number;
+  marks: SessionMarks;
+  project: Project;
+  /** Checkout that holds the session, when the project's checkouts are loaded. */
+  checkout?: Checkout;
+}
+
+export interface InboxEntry extends InboxInput {
+  section: InboxSection;
+  /** The snooze time passed and the user has not opened the session since. */
+  woke: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // PTY in the OpenCode service (src/core/pty)
 // ---------------------------------------------------------------------------
 

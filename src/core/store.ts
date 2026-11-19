@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import type { Project } from '../types.ts';
+import type { Project, SessionMarks } from '../types.ts';
 import { samePath } from './paths.ts';
 
 export interface UiState {
@@ -16,10 +16,8 @@ export interface UiState {
   [key: string]: unknown;
 }
 
-export interface SessionMeta {
-  lastSeen?: number;
-  snoozedUntil?: number;
-  settled?: boolean;
+/** The marks of one session (see `SessionMarks`), plus unknown keys from other versions. */
+export interface SessionMeta extends SessionMarks {
   [key: string]: unknown;
 }
 
